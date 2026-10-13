@@ -1,3 +1,4 @@
+compatibility_flags = [ "nodejs_compat" ]
 name = "corner-cafe-coasters"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
