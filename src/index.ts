@@ -13,13 +13,20 @@ export default {
       return new Response('Corner Cafe Bot is running ☕', { status: 200 });
     }
 
-    const signature = request.headers.get('x-signature-ed25519');
-    const timestamp = request.headers.get('x-signature-timestamp');
-    const bodyText = await request.text();
+const signature = request.headers.get('X-Signature-Ed25519') || request.headers.get('x-signature-ed25519');
+  const timestamp = request.headers.get('X-Signature-Timestamp') || request.headers.get('x-signature-timestamp');
+  const bodyText = await request.text();
 
-    if (!signature || !timestamp || !verifyKey(bodyText, signature, timestamp, env.DISCORD_PUBLIC_KEY)) {
-      return new Response('Invalid signature', { status: 401 });
-    }
+  let isValid = false;
+  try {
+    isValid = verifyKey(bodyText, signature || '', timestamp || '', env.DISCORD_PUBLIC_KEY);
+  } catch (e) {
+    isValid = false;
+  }
+
+  if (!signature || !timestamp || !isValid) {
+    return new Response('Invalid signature', { status: 401 });
+  }
 
     const interaction = JSON.parse(bodyText);
 
