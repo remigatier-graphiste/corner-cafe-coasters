@@ -63,9 +63,20 @@ export default {
   },
 };
 
+function hasBaristaPermission(interaction: any, env: Env): boolean {
+  // Vérifie si l'utilisateur a la permission Admin Discord OU le rôle "Coasters Barista ☕"
+  const permissions = BigInt(interaction.member?.permissions || '0');
+  const isAdmin = (permissions & 0x8n) === 0x8n;
+  
+  const userRoles: string[] = interaction.member?.roles || [];
+  const hasRole = env.ADMIN_ROLE_ID ? userRoles.includes(env.ADMIN_ROLE_ID) : false;
+
+  return isAdmin || hasRole;
+}
+
 async function handleDaily(env: Env, userId: string): Promise<Response> {
   const today = new Date().toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' });
-
+  
   let user = await env.DB.prepare(`SELECT last_daily FROM users WHERE discord_id = ?`).bind(userId).first();
   if (user && user.last_daily === today) {
     return Response.json({
@@ -77,8 +88,8 @@ async function handleDaily(env: Env, userId: string): Promise<Response> {
   await env.DB.prepare(`INSERT INTO users (discord_id, last_daily) VALUES (?, ?) ON CONFLICT(discord_id) DO UPDATE SET last_daily = ?`)
     .bind(userId, today, today).run();
 
-  const activeSet = await env.DB.prepare(`SELECT id FROM sets WHERE is_open = 1 LIMIT 1`).first();
-  const setId = activeSet ? (activeSet.id as string) : 'ete-2026';
+  const activeSet = await env.DB.prepare(`SELECT id, name FROM sets WHERE is_open = 1 LIMIT 1`).first();
+  const setId = activeSet ? (activeSet.id as string) : 'hiver-2027';
 
   await env.DB.prepare(`
     INSERT INTO user_packs (user_id, pack_type, set_id, quantity) VALUES (?, 'petit_sachet', ?, 1)
@@ -87,13 +98,14 @@ async function handleDaily(env: Env, userId: string): Promise<Response> {
 
   return Response.json({
     type: 4,
-    data: { content: `🍪 **C'est l'heure de la pause !** Tu as reçu 1 Petit Sachet de dessous de verre (${setId}). Utilise \`/ouvrir type: Petit Sachet\` pour l'ouvrir !` }
+    data: { content: `🍪 **C'est l'heure de la pause !** Tu as reçu 1 Petit Sachet de dessous de verre (*${setId}*). Utilise \`/ouvrir type: Petit Sachet\` pour l'ouvrir !` }
   });
 }
 
 async function handleOpenPack(env: Env, userId: string, packTypeId: string): Promise<Response> {
-  const activeSet = await env.DB.prepare(`SELECT id FROM sets WHERE is_open = 1 LIMIT 1`).first();
-  const setId = activeSet ? (activeSet.id as string) : 'ete-2026';
+  const activeSet = await env.DB.prepare(`SELECT id, name FROM sets WHERE is_open = 1 LIMIT 1`).first();
+  const setId = activeSet ? (activeSet.id as string) : 'hiver-2027';
+  const setName = activeSet ? (activeSet.name as string) : 'Hiver 2027';
 
   const pack = await env.DB.prepare(`SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ? AND set_id = ?`)
     .bind(userId, packTypeId, setId).first();
@@ -101,7 +113,7 @@ async function handleOpenPack(env: Env, userId: string, packTypeId: string): Pro
   if (!pack || (pack.quantity as number) <= 0) {
     return Response.json({
       type: 4,
-      data: { content: `❌ Tu n'as plus de **${packTypeId}** en stock pour l'extension active (${setId}). Participe aux events ou utilise \`/quotidien\` !`, flags: 64 }
+      data: { content: `❌ Tu n'as plus de **${packTypeId}** en stock pour l'extension **${setName}**. Participe aux events ou utilise \`/quotidien\` !`, flags: 64 }
     });
   }
 
@@ -110,14 +122,13 @@ async function handleOpenPack(env: Env, userId: string, packTypeId: string): Pro
 
   const packConfig = PACK_TYPES[packTypeId as keyof typeof PACK_TYPES];
   const coastersInSet = await env.DB.prepare(`SELECT * FROM coasters WHERE set_id = ?`).bind(setId).all();
-
+  
   if (!coastersInSet.results || coastersInSet.results.length === 0) {
     return Response.json({ type: 4, data: { content: '❌ Erreur : Aucun dessous de verre configuré dans cette extension.', flags: 64 } });
   }
 
   const results = [];
   for (let i = 0; i < packConfig.size; i++) {
-    // Si c'est le dernier slot et qu'il y a une rareté minimale garantie
     const isGuaranteedSlot = i === packConfig.size - 1 && packConfig.minRarity;
     const chosenRarity = rollRarity(isGuaranteedSlot ? packConfig.minRarity : undefined);
 
@@ -136,7 +147,16 @@ async function handleOpenPack(env: Env, userId: string, packTypeId: string): Pro
       ON CONFLICT(user_id, coaster_id, finish) DO UPDATE SET quantity = quantity + 1
     `).bind(userId, drawn.id, finish).run();
 
-    results.push({ coasterId: drawn.id, name: drawn.name, rarity: drawn.rarity, finish, isNew, image: drawn.image });
+    results.push({
+      coasterId: drawn.id,
+      name: drawn.name,
+      rarity: drawn.rarity,
+      type: drawn.type,
+      description: drawn.description,
+      finish,
+      isNew,
+      image: drawn.image
+    });
   }
 
   const openingRes = await env.DB.prepare(`INSERT INTO openings (user_id, pack_type, set_id, results) VALUES (?, ?, ?, ?) RETURNING id`)
@@ -149,7 +169,7 @@ async function handleOpenPack(env: Env, userId: string, packTypeId: string): Pro
   return Response.json({
     type: 4,
     data: {
-      content: `📦 **Ouverture de ${packConfig.label} (${1}/${results.length})**\n${rarityInfo.emoji} **${firstCard.name}** (${rarityInfo.label}) ${firstCard.finish === 'brillant' ? '✨ **BRILLANT !**' : ''} ${firstCard.isNew ? '🌟 **NOUVEAU !**' : '(Doublon)'}`,
+      content: formatCoasterMessage(firstCard, setName, 1, results.length),
       components: results.length > 1 ? [{
         type: 1,
         components: [{
@@ -173,16 +193,18 @@ async function handleRevealNext(env: Env, userId: string, customId: string): Pro
     return Response.json({ type: 7, data: { content: '❌ Session d\'ouverture expirée.', components: [] } });
   }
 
+  const activeSet = await env.DB.prepare(`SELECT name FROM sets WHERE id = ?`).bind(opening.set_id).first();
+  const setName = activeSet ? (activeSet.name as string) : 'Hiver 2027';
+
   const results = JSON.parse(opening.results as string);
   const card = results[currentIndex];
-  const rarityInfo = RARITIES[card.rarity as keyof typeof RARITIES];
   const nextIndex = currentIndex + 1;
   const isFinished = nextIndex >= results.length;
 
   return Response.json({
     type: 7,
     data: {
-      content: `📦 **Ouverture (${nextIndex}/${results.length})**\n${rarityInfo.emoji} **${card.name}** (${rarityInfo.label}) ${card.finish === 'brillant' ? '✨ **BRILLANT !**' : ''} ${card.isNew ? '🌟 **NOUVEAU !**' : '(Doublon)'}`,
+      content: formatCoasterMessage(card, setName, nextIndex, results.length),
       components: isFinished ? [] : [{
         type: 1,
         components: [{
@@ -194,6 +216,18 @@ async function handleRevealNext(env: Env, userId: string, customId: string): Pro
       }]
     }
   });
+}
+
+function formatCoasterMessage(card: any, setName: string, current: number, total: number): string {
+  const rarityInfo = RARITIES[card.rarity as keyof typeof RARITIES];
+  const typeStr = card.type ? ` • *${card.type}*` : '';
+  const descStr = card.description ? `\n> *"${card.description}"*` : '';
+  const shinyStr = card.finish === 'brillant' ? ' ✨ **BRILLANT !**' : '';
+  const newStr = card.isNew ? ' 🌟 **NOUVEAU !**' : ' *(Doublon)*';
+
+  return `📦 **Ouverture (${current}/${total})** — Extension : **${setName}**\n` +
+         `${rarityInfo.emoji} **${card.name}** [Material: ${rarityInfo.label}]${typeStr}${shinyStr}${newStr}` +
+         `${descStr}`;
 }
 
 async function handleInventory(env: Env, userId: string): Promise<Response> {
@@ -210,9 +244,8 @@ async function handleInventory(env: Env, userId: string): Promise<Response> {
 }
 
 async function handleAdminGive(env: Env, interaction: any, options: any): Promise<Response> {
-  const permissions = BigInt(interaction.member?.permissions || '0');
-  if ((permissions & 0x8n) !== 0x8n) {
-    return Response.json({ type: 4, data: { content: '❌ Réservé aux administrateurs.', flags: 64 } });
+  if (!hasBaristaPermission(interaction, env)) {
+    return Response.json({ type: 4, data: { content: '❌ Réservé aux membres ayant le rôle **Coasters Barista ☕**.', flags: 64 } });
   }
 
   const targetUser = options.find((o: any) => o.name === 'membre').value;
@@ -220,7 +253,7 @@ async function handleAdminGive(env: Env, interaction: any, options: any): Promis
   const qty = options.find((o: any) => o.name === 'quantite')?.value || 1;
 
   const activeSet = await env.DB.prepare(`SELECT id FROM sets WHERE is_open = 1 LIMIT 1`).first();
-  const setId = activeSet ? (activeSet.id as string) : 'ete-2026';
+  const setId = activeSet ? (activeSet.id as string) : 'hiver-2027';
 
   await env.DB.prepare(`
     INSERT INTO user_packs (user_id, pack_type, set_id, quantity) VALUES (?, ?, ?, ?)
@@ -229,19 +262,18 @@ async function handleAdminGive(env: Env, interaction: any, options: any): Promis
 
   return Response.json({
     type: 4,
-    data: { content: `🎁 Administrateur : ${qty}x **${packType}** offerts avec succès à <@${targetUser}> !` }
+    data: { content: `☕ **Barista** : ${qty}x **${packType}** offerts avec succès à <@${targetUser}> !` }
   });
 }
 
 async function handleAdminDrop(env: Env, interaction: any, options: any): Promise<Response> {
-  const permissions = BigInt(interaction.member?.permissions || '0');
-  if ((permissions & 0x8n) !== 0x8n) {
-    return Response.json({ type: 4, data: { content: '❌ Réservé aux administrateurs.', flags: 64 } });
+  if (!hasBaristaPermission(interaction, env)) {
+    return Response.json({ type: 4, data: { content: '❌ Réservé aux membres ayant le rôle **Coasters Barista ☕**.', flags: 64 } });
   }
 
   const packType = options.find((o: any) => o.name === 'type').value;
   const activeSet = await env.DB.prepare(`SELECT id FROM sets WHERE is_open = 1 LIMIT 1`).first();
-  const setId = activeSet ? (activeSet.id as string) : 'ete-2026';
+  const setId = activeSet ? (activeSet.id as string) : 'hiver-2027';
   const dropId = Math.random().toString(36).substring(2, 9);
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
