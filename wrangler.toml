@@ -12,4 +12,4 @@ database_name = "coasters"
 database_id = "0bb6184b-e033-4fd5-8709-f8cade74da45"
 
 [vars]
-ADMIN_ROLE_ID = ""
+ADMIN_ROLE_ID = "1559658871252058193"
