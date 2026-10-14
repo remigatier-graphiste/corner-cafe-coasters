@@ -72,23 +72,22 @@ const commands = [
   }
 ];
 
-// Helper pour associer un rond de couleur selon TES vraies raretés
-function getRarityCircle(rarity?: string): string {
-  if (!rarity) return '🔘';
+// Helper pour associer un rond de couleur et le nom bien capitalisé de la rareté
+function getRarityInfo(rarity?: string): { circle: string, name: string } {
+  if (!rarity) return { circle: '🔘', name: 'Inconnue' };
   const r = rarity.toLowerCase().trim();
-  if (r.includes('carton')) return '⚪';
-  if (r.includes('bois')) return '🟢';
-  if (r.includes('liege') || r.includes('liège')) return '🟤';
-  if (r.includes('ceramique') || r.includes('céramique')) return '🔵';
-  if (r.includes('metal') || r.includes('métal')) return '🟡';
-  return '🔘';
+  if (r.includes('carton')) return { circle: '⚪', name: 'Carton' };
+  if (r.includes('bois')) return { circle: '🟢', name: 'Bois' };
+  if (r.includes('liege') || r.includes('liège')) return { circle: '🟤', name: 'Liège' };
+  if (r.includes('ceramique') || r.includes('céramique')) return { circle: '🔵', name: 'Céramique' };
+  if (r.includes('metal') || r.includes('métal')) return { circle: '🟡', name: 'Métal' };
+  return { circle: '🔘', name: rarity.charAt(0).toUpperCase() + rarity.slice(1) };
 }
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Route d'enregistrement des commandes
     if (url.pathname === '/register-commandes') {
       const CLIENT_ID = "1559598773389500526";
       const GUILD_ID = "408413734894174228";
@@ -369,8 +368,8 @@ export default {
               };
 
               const itemsList = pulledCoasters.map(c => {
-                const circle = getRarityCircle(c.rarity);
-                return `${circle} **${c.name || c.id}** (\`${c.id}\`)`;
+                const { circle, name } = getRarityInfo(c.rarity);
+                return `${circle} **[${name}]** **${c.name || c.id}** (\`${c.id}\`)`;
               }).join('\n');
 
               const embed: any = {
@@ -379,15 +378,13 @@ export default {
                 color: 14897974 // Terracotta #E35336
               };
 
-              // Reconstitution intelligente de l'URL de l'image
+              const fallbackTestImage = "https://raw.githubusercontent.com/remigatier-graphiste/corner-cafe-coasters/main/public/coasters/hiver-2027/coaster_test.png";
               const rawImg = pulledCoasters[0]?.image || pulledCoasters[0]?.image_url || pulledCoasters[0]?.url;
-              if (rawImg && typeof rawImg === 'string') {
-                if (rawImg.startsWith('http')) {
-                  embed.image = { url: rawImg };
-                } else {
-                  // Si c'est un nom de fichier relatif (ex: chocolat-chaud.png), on pointe sur GitHub Raw dans /public
-                  embed.image = { url: `https://raw.githubusercontent.com/remigatier-graphiste/corner-cafe-coasters/main/public/${rawImg}` };
-                }
+
+              if (rawImg && typeof rawImg === 'string' && rawImg.startsWith('http')) {
+                embed.image = { url: rawImg };
+              } else {
+                embed.image = { url: fallbackTestImage };
               }
 
               await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
@@ -445,8 +442,8 @@ export default {
             } else {
               for (const row of coasters as any[]) {
                 const coasterName = row.name || row.coaster_id;
-                const circle = getRarityCircle(row.rarity);
-                description += `- ${circle} **${coasterName}** (\`ID: ${row.coaster_id}\`) [Finition: *${row.finish}*] : **x${row.quantity}**\n`;
+                const { circle, name } = getRarityInfo(row.rarity);
+                description += `- ${circle} **[${name}]** **${coasterName}** (\`ID: ${row.coaster_id}\`) [Finition: *${row.finish}*] : **x${row.quantity}**\n`;
               }
             }
 
