@@ -72,6 +72,18 @@ const commands = [
   }
 ];
 
+// Helper pour associer un rond de couleur selon TES vraies raretés
+function getRarityCircle(rarity?: string): string {
+  if (!rarity) return '🔘';
+  const r = rarity.toLowerCase().trim();
+  if (r.includes('carton')) return '⚪';
+  if (r.includes('bois')) return '🟢';
+  if (r.includes('liege') || r.includes('liège')) return '🟤';
+  if (r.includes('ceramique') || r.includes('céramique')) return '🔵';
+  if (r.includes('metal') || r.includes('métal')) return '🟡';
+  return '🔘';
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -292,7 +304,6 @@ export default {
             });
           }
 
-          // Exécution en tâche de fond async pour éviter le timeout de 3 secondes de Discord
           ctx.waitUntil((async () => {
             try {
               const packRecord = await env.DB.prepare(
@@ -357,15 +368,26 @@ export default {
                 'coffret': 'Coffret'
               };
 
+              const itemsList = pulledCoasters.map(c => {
+                const circle = getRarityCircle(c.rarity);
+                return `${circle} **${c.name || c.id}** (\`${c.id}\`)`;
+              }).join('\n');
+
               const embed: any = {
                 title: `🎁 Ouverture d'un ${packNames[packType] || packType} !`,
-                description: `Tu as obtenu :\n\n` + pulledCoasters.map(c => `✨ **${c.name || c.id}** (\`${c.id}\`)${c.rarity ? ` [Rareté: *${c.rarity}*]` : ''}`).join('\n'),
-                color: 14897974
+                description: `Tu as obtenu :\n\n${itemsList}`,
+                color: 14897974 // Terracotta #E35336
               };
 
-              const firstImg = pulledCoasters[0]?.image || pulledCoasters[0]?.image_url;
-              if (firstImg && typeof firstImg === 'string' && firstImg.startsWith('http')) {
-                embed.image = { url: firstImg };
+              // Reconstitution intelligente de l'URL de l'image
+              const rawImg = pulledCoasters[0]?.image || pulledCoasters[0]?.image_url || pulledCoasters[0]?.url;
+              if (rawImg && typeof rawImg === 'string') {
+                if (rawImg.startsWith('http')) {
+                  embed.image = { url: rawImg };
+                } else {
+                  // Si c'est un nom de fichier relatif (ex: chocolat-chaud.png), on pointe sur GitHub Raw dans /public
+                  embed.image = { url: `https://raw.githubusercontent.com/remigatier-graphiste/corner-cafe-coasters/main/public/${rawImg}` };
+                }
               }
 
               await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
@@ -383,7 +405,6 @@ export default {
             }
           })());
 
-          // Réponse instantanée à Discord (Type 5: DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE)
           return Response.json({ type: 5 });
         }
 
@@ -424,8 +445,8 @@ export default {
             } else {
               for (const row of coasters as any[]) {
                 const coasterName = row.name || row.coaster_id;
-                const rarityStr = row.rarity ? ` [Rareté: *${row.rarity}*]` : '';
-                description += `- **${coasterName}** (\`ID: ${row.coaster_id}\`)${rarityStr} [Finition: *${row.finish}*] : **x${row.quantity}**\n`;
+                const circle = getRarityCircle(row.rarity);
+                description += `- ${circle} **${coasterName}** (\`ID: ${row.coaster_id}\`) [Finition: *${row.finish}*] : **x${row.quantity}**\n`;
               }
             }
 
