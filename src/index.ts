@@ -281,7 +281,7 @@ export default {
 
             return Response.json({
               type: 4,
-              data: { content: `🎉 Tu as récupéré ton **Sachet** quotidien ! Utilise \`/ouvrir\` pour l'ouvrir.` }
+              data: { content: `🎉 Tu a récupéré ton **Sachet** quotidien ! Utilise \`/ouvrir\` pour l'ouvrir.` }
             });
 
           } catch (err: any) {
@@ -321,7 +321,7 @@ export default {
             };
             const count = packSizes[packType] || 1;
 
-            const { results: allCoasters } = await env.DB.prepare(`SELECT id, name FROM coasters`).all();
+            const { results: allCoasters } = await env.DB.prepare(`SELECT * FROM coasters`).all();
             if (!allCoasters || allCoasters.length === 0) {
               return Response.json({
                 type: 4,
@@ -364,14 +364,22 @@ export default {
               'coffret': 'Coffret'
             };
 
-            let responseText = `🎁 **Ouverture d'un ${packNames[packType] || packType} !** Tu as obtenu :\n\n`;
-            for (const c of pulledCoasters) {
-              responseText += `✨ **${c.name}** (\`${c.id}\`)\n`;
+            const embed: any = {
+              title: `🎁 Ouverture d'un ${packNames[packType] || packType} !`,
+              description: `Tu as obtenu :\n\n` + pulledCoasters.map(c => `✨ **${c.name}** (\`${c.id}\`) ${c.rarity ? `[Rareté: *${c.rarity}*]` : ''}`).join('\n'),
+              color: 14897974 // Terracotta #E35336
+            };
+
+            const imageUrl = pulledCoasters[0]?.image || pulledCoasters[0]?.image_url;
+            if (imageUrl) {
+              embed.image = { url: imageUrl };
             }
 
             return Response.json({
               type: 4,
-              data: { content: responseText }
+              data: {
+                embeds: [embed]
+              }
             });
 
           } catch (err: any) {
@@ -385,7 +393,7 @@ export default {
         case 'inventaire': {
           try {
             const { results: coasters } = await env.DB.prepare(
-              `SELECT i.coaster_id, i.finish, i.quantity, c.name 
+              `SELECT i.coaster_id, i.finish, i.quantity, c.name, c.rarity 
                FROM inventory i 
                LEFT JOIN coasters c ON i.coaster_id = c.id 
                WHERE i.user_id = ?`
@@ -419,7 +427,8 @@ export default {
             } else {
               for (const row of coasters as any[]) {
                 const coasterName = row.name || row.coaster_id;
-                description += `- **${coasterName}** (\`ID: ${row.coaster_id}\`) [Finition: *${row.finish}*] : **x${row.quantity}**\n`;
+                const rarityStr = row.rarity ? ` [Rareté: *${row.rarity}*]` : '';
+                description += `- **${coasterName}** (\`ID: ${row.coaster_id}\`)${rarityStr} [Finition: *${row.finish}*] : **x${row.quantity}**\n`;
               }
             }
 
