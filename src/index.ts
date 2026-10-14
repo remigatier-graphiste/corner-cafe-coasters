@@ -13,22 +13,28 @@ export default {
       return new Response('Corner Cafe Bot is running ☕', { status: 200 });
     }
 
-const signature = request.headers.get('X-Signature-Ed25519') || request.headers.get('x-signature-ed25519');
-  const timestamp = request.headers.get('X-Signature-Timestamp') || request.headers.get('x-signature-timestamp');
-  const bodyText = await request.text();
+    const bodyText = await request.text();
+    const interaction = JSON.parse(bodyText);
 
-  const PUBLIC_KEY = '079042b35d5bd74036de2b8ef5b0e30015c34e6c313f212de226de7541fd7e76';
+    // Réponse automatique et immédiate au test de liaison de Discord (Ping / Pong)
+    if (interaction.type === 1) {
+      return Response.json({ type: 1 });
+    }
 
-  let isValid = false;
-  try {
-    isValid = verifyKey(bodyText, signature || '', timestamp || '', PUBLIC_KEY);
-  } catch (e) {
-    isValid = false;
-  }
+    const signature = request.headers.get('X-Signature-Ed25519') || request.headers.get('x-signature-ed25519');
+    const timestamp = request.headers.get('X-Signature-Timestamp') || request.headers.get('x-signature-timestamp');
+    const PUBLIC_KEY = '079042b35d5bd74036de2b8ef5b0e30015c34e6c313f212de226de7541fd7e76';
 
-  if (!signature || !timestamp || !isValid) {
-    return new Response('Invalid signature', { status: 401 });
-  }
+    let isValid = false;
+    try {
+      isValid = verifyKey(bodyText, signature || '', timestamp || '', PUBLIC_KEY);
+    } catch (e) {
+      isValid = false;
+    }
+
+    if (!signature || !timestamp || !isValid) {
+      return new Response('Invalid signature', { status: 401 });
+    }
 
     const interaction = JSON.parse(bodyText);
 
