@@ -378,14 +378,9 @@ export default {
                 color: 14897974 // Terracotta #E35336
               };
 
-              const fallbackTestImage = "https://raw.githubusercontent.com/remigatier-graphiste/corner-cafe-coasters/main/public/coasters/hiver-2027/coaster_test.png";
-              const rawImg = pulledCoasters[0]?.image || pulledCoasters[0]?.image_url || pulledCoasters[0]?.url;
-
-              if (rawImg && typeof rawImg === 'string' && rawImg.startsWith('http')) {
-                embed.image = { url: rawImg };
-              } else {
-                embed.image = { url: fallbackTestImage };
-              }
+              // Utilisation directe de ton image de test GitHub Raw
+              const imageUrl = "https://raw.githubusercontent.com/remigatier-graphiste/corner-cafe-coasters/main/public/coasters/hiver-2027/coaster_test.png";
+              embed.image = { url: imageUrl };
 
               await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
                 method: 'PATCH',
