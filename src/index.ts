@@ -69,6 +69,11 @@ const commands = [
     name: 'inventaire',
     description: 'Afficher ta collection de coasters et tes packs',
     options: [],
+  },
+  {
+    name: 'profil',
+    description: 'Afficher ton profil et les statistiques de ta collection',
+    options: [],
   }
 ];
 
@@ -378,7 +383,6 @@ export default {
                 color: 14897974 // Terracotta #E35336
               };
 
-              // Utilisation directe de ton image de test GitHub Raw
               const imageUrl = "https://raw.githubusercontent.com/remigatier-graphiste/corner-cafe-coasters/main/public/coasters/hiver-2027/coaster_test.png";
               embed.image = { url: imageUrl };
 
@@ -451,6 +455,90 @@ export default {
             return Response.json({
               type: 4,
               data: { content: `❌ Erreur lors de la lecture de l'inventaire : ${err.message}`, flags: 64 }
+            });
+          }
+        }
+
+        case 'profil': {
+          try {
+            const { results: coasters } = await env.DB.prepare(
+              `SELECT i.coaster_id, i.quantity, c.rarity 
+               FROM inventory i 
+               LEFT JOIN coasters c ON i.coaster_id = c.id 
+               WHERE i.user_id = ?`
+            ).bind(userId).all();
+
+            const totalExistingRes = await env.DB.prepare(`SELECT COUNT(*) as total FROM coasters`).first() as any;
+            const totalExisting = totalExistingRes?.total || 0;
+
+            let totalCards = 0;
+            let uniqueCards = coasters.length;
+            const rarityCounts: Record<string, number> = {
+              'Carton': 0,
+              'Bois': 0,
+              'Liège': 0,
+              'Céramique': 0,
+              'Métal': 0
+            };
+
+            for (const row of coasters as any[]) {
+              const qty = row.quantity || 0;
+              totalCards += qty;
+
+              const { name: rarityName } = getRarityInfo(row.rarity);
+              if (rarityCounts[rarityName] !== undefined) {
+                rarityCounts[rarityName] += qty;
+              } else {
+                rarityCounts[rarityName] = (rarityCounts[rarityName] || 0) + qty;
+              }
+            }
+
+            const completionPercent = totalExisting > 0 ? Math.round((uniqueCards / totalExisting) * 100) : 0;
+
+            let rankTitle = "🌱 Débutant Curieux";
+            if (completionPercent >= 100) rankTitle = "👑 Maître du Café (Collection Complète !)";
+            else if (completionPercent >= 75) rankTitle = "🌟 Collectionneur Expert";
+            else if (completionPercent >= 40) rankTitle = "☕ Amateur Éclairé";
+            else if (completionPercent >= 20) rankTitle = "☕ Apprenti Barista";
+
+            const userObj = interaction.member?.user || interaction.user;
+            const userName = userObj?.username || "Barista";
+            const avatarHash = userObj?.avatar;
+            const avatarUrl = avatarHash ? `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.png` : undefined;
+
+            const profileDesc = [
+              `**Statut :** ${rankTitle}`,
+              ``,
+              `📊 **Complétion :** **${uniqueCards} /${totalExisting}** uniques (${completionPercent}%)`,
+              `📦 **Total de cartes :** **${totalCards}** (avec doublons)`,
+              ``,
+              `🎨 **Cartes par rareté :**`,
+              `⚪ **Carton** : ${rarityCounts['Carton'] || 0}`,
+              `🟢 **Bois** : ${rarityCounts['Bois'] || 0}`,
+              `🟤 **Liège** : ${rarityCounts['Liège'] || 0}`,
+              `🔵 **Céramique** : ${rarityCounts['Céramique'] || 0}`,
+              `🟡 **Métal** : ${rarityCounts['Métal'] || 0}`
+            ].join('\n');
+
+            const embed: any = {
+              title: `☕ Profil de ${userName}`,
+              description: profileDesc,
+              color: 14897974 // Terracotta #E35336
+            };
+
+            if (avatarUrl) {
+              embed.thumbnail = { url: avatarUrl };
+            }
+
+            return Response.json({
+              type: 4,
+              data: { embeds: [embed] }
+            });
+
+          } catch (err: any) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ Erreur lors de la lecture du profil : ${err.message}`, flags: 64 }
             });
           }
         }
