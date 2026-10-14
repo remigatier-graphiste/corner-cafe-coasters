@@ -135,13 +135,17 @@ export default {
       return Response.json({ type: 1 });
     }
 
-    // Initialisation sécurisée des tables si besoin
+    // Initialisation sécurisée des tables et du set par défaut
     try {
       await env.DB.prepare(`
         CREATE TABLE IF NOT EXISTS users (
           discord_id TEXT PRIMARY KEY,
           last_daily TEXT
         )
+      `).run();
+
+      await env.DB.prepare(`
+        INSERT OR IGNORE INTO sets (id, name) VALUES ('general', 'Général')
       `).run();
     } catch (e) {}
 
@@ -185,6 +189,9 @@ export default {
 
           try {
             await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(targetUserId).run();
+            try {
+              await env.DB.prepare(`INSERT OR IGNORE INTO sets (id, name) VALUES ('general', 'Général')`).run();
+            } catch (err) {}
 
             if (coasterId) {
               const existing = await env.DB.prepare(
@@ -208,7 +215,6 @@ export default {
             }
 
             if (packType) {
-              // Logique bulletproof : UPDATE d'abord, si 0 ligne modifiée, INSERT
               const updateRes = await env.DB.prepare(
                 `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
               ).bind(targetUserId, packType).run();
@@ -244,6 +250,9 @@ export default {
         case 'quotidien': {
           try {
             await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
+            try {
+              await env.DB.prepare(`INSERT OR IGNORE INTO sets (id, name) VALUES ('general', 'Général')`).run();
+            } catch (err) {}
             
             const userRecord = await env.DB.prepare(`SELECT last_daily FROM users WHERE discord_id = ?`).bind(userId).first() as any;
             const now = Date.now();
