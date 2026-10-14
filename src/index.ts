@@ -36,7 +36,6 @@ export default {
       const memberRoles = interaction.member?.roles || [];
       const ADMIN_ROLE_ID = env.ADMIN_ROLE_ID || '1559658871252058193';
 
-      // Vérification si l'utilisateur est admin
       const isAdmin = memberRoles.includes(ADMIN_ROLE_ID);
 
       switch (name) {
@@ -47,10 +46,47 @@ export default {
               data: { content: "⛔ Tu n'as pas les permissions pour utiliser cette commande.", flags: 64 }
             });
           }
-          return Response.json({
-            type: 4,
-            data: { content: "☕ [Admin] Commande /donner reçue ! Connexion à la base de données D1 en préparation..." }
-          });
+
+          // Extraction des options de la commande (ex: utilisateur et sous-bock)
+          // On s'attend à ce que l'option 1 soit l'utilisateur et l'option 2 soit l'ID du sous-bock
+          const targetUserOpt = options?.find((opt: any) => opt.name === 'utilisateur');
+          const coasterOpt = options?.find((opt: any) => opt.name === 'sous_bock');
+
+          const targetUserId = targetUserOpt?.value;
+          const coasterId = coasterOpt?.value || 'hiver-2027-001'; // Par défaut le sous-bock de test
+
+          if (!targetUserId) {
+            return Response.json({
+              type: 4,
+              data: { content: "❌ Erreur : Tu dois spécifier un utilisateur à qui donner le sous-bock.", flags: 64 }
+            });
+          }
+
+          try {
+            // A. S'assurer que l'utilisateur existe dans la table users (Lazy Initialization)
+            await env.DB.prepare(
+              `INSERT OR IGNORE INTO users (discord_id) VALUES (?)`
+            ).bind(targetUserId).run();
+
+            // B. Ajouter le sous-bock dans son inventaire (ou incrémenter la quantité si déjà possédé)
+            await env.DB.prepare(
+              `INSERT INTO inventory (user_id, coaster_id, finish, quantity) 
+               VALUES (?, ?, 'normal', 1)
+               ON CONFLICT(user_id, coaster_id, finish) 
+               DO UPDATE SET quantity = quantity + 1`
+            ).bind(targetUserId, coasterId).run();
+
+            return Response.json({
+              type: 4,
+              data: { content: `☕ Succès ! Le sous-bock \`${coasterId}\` a été ajouté à l'inventaire de <@${targetUserId}>.` }
+            });
+
+          } catch (err: any) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ Erreur technique avec la base de données : ${err.message}`, flags: 64 }
+            });
+          }
         }
 
         case 'drop': {
@@ -62,7 +98,7 @@ export default {
           }
           return Response.json({
             type: 4,
-            data: { content: "☕ [Admin] Commande /drop reçue ! Lancement d'un drop de sous-bocks en préparation..." }
+            data: { content: "☕ [Admin] Commande /drop en cours de configuration..." }
           });
         }
 
