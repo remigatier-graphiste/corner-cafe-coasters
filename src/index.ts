@@ -208,15 +208,12 @@ export default {
             }
 
             if (packType) {
-              const existingPack = await env.DB.prepare(
-                `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
-              ).bind(targetUserId, packType).first() as any;
+              // Logique bulletproof : UPDATE d'abord, si 0 ligne modifiée, INSERT
+              const updateRes = await env.DB.prepare(
+                `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
+              ).bind(targetUserId, packType).run();
 
-              if (existingPack) {
-                await env.DB.prepare(
-                  `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
-                ).bind(targetUserId, packType).run();
-              } else {
+              if (!updateRes.meta.changes || updateRes.meta.changes === 0) {
                 await env.DB.prepare(
                   `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'general')`
                 ).bind(targetUserId, packType).run();
@@ -263,15 +260,11 @@ export default {
 
             await env.DB.prepare(`UPDATE users SET last_daily = ? WHERE discord_id = ?`).bind(now.toString(), userId).run();
 
-            const existingPack = await env.DB.prepare(
-              `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = 'sachet' AND set_id = 'general'`
-            ).bind(userId).first() as any;
+            const updateRes = await env.DB.prepare(
+              `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = 'sachet' AND set_id = 'general'`
+            ).bind(userId).run();
 
-            if (existingPack) {
-              await env.DB.prepare(
-                `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = 'sachet' AND set_id = 'general'`
-              ).bind(userId).run();
-            } else {
+            if (!updateRes.meta.changes || updateRes.meta.changes === 0) {
               await env.DB.prepare(
                 `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, 'sachet', 1, 'general')`
               ).bind(userId).run();
