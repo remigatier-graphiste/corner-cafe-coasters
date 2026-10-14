@@ -1,5 +1,5 @@
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const CLIENT_ID = "1559598773389500526"; // Ton application ID (public)
+const CLIENT_ID = "1559598773389500526";
 
 const commands = [
   {
@@ -14,7 +14,7 @@ const commands = [
       },
       {
         name: 'coaster_id',
-        description: 'L''ID du coaster à donner (ex: hiver-2027-001)',
+        description: "L'ID du coaster à donner (ex: hiver-2027-001)",
         type: 3,
         required: false,
       }
