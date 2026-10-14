@@ -2,6 +2,7 @@ import { verifyKey } from 'discord-interactions';
 
 export interface Env {
   DB: D1Database;
+  ADMIN_ROLE_ID?: string;
 }
 
 export default {
@@ -24,7 +25,7 @@ export default {
 
     const interaction = JSON.parse(bodyText);
 
-    // 1. Réponse obligatoire au test de liaison (Ping / Type 1)
+    // 1. Réponse au PING de Discord
     if (interaction.type === 1) {
       return Response.json({ type: 1 });
     }
@@ -32,24 +33,47 @@ export default {
     // 2. Gestion des commandes Slash (Type 2)
     if (interaction.type === 2) {
       const { name, options } = interaction.data;
-      const userId = interaction.member?.user.id || interaction.user?.id;
+      const memberRoles = interaction.member?.roles || [];
+      const ADMIN_ROLE_ID = env.ADMIN_ROLE_ID || '1559658871252058193';
+
+      // Vérification si l'utilisateur est admin
+      const isAdmin = memberRoles.includes(ADMIN_ROLE_ID);
 
       switch (name) {
+        case 'donner': {
+          if (!isAdmin) {
+            return Response.json({
+              type: 4,
+              data: { content: "⛔ Tu n'as pas les permissions pour utiliser cette commande.", flags: 64 }
+            });
+          }
+          return Response.json({
+            type: 4,
+            data: { content: "☕ [Admin] Commande /donner reçue ! Connexion à la base de données D1 en préparation..." }
+          });
+        }
+
+        case 'drop': {
+          if (!isAdmin) {
+            return Response.json({
+              type: 4,
+              data: { content: "⛔ Tu n'as pas les permissions pour utiliser cette commande.", flags: 64 }
+            });
+          }
+          return Response.json({
+            type: 4,
+            data: { content: "☕ [Admin] Commande /drop reçue ! Lancement d'un drop de sous-bocks en préparation..." }
+          });
+        }
+
         case 'quotidien':
-          return Response.json({
-            type: 4,
-            data: { content: "🎁 Commande /quotidien prête à être connectée à la base de données !" }
-          });
         case 'ouvrir':
-          return Response.json({
-            type: 4,
-            data: { content: "📦 Commande /ouvrir prête à l'emploi !" }
-          });
         case 'inventaire':
           return Response.json({
             type: 4,
-            data: { content: "🎒 Commande /inventaire prête à l'emploi !" }
+            data: { content: `🎁 Commande /${name} enregistrée, bientôt disponible !` }
           });
+
         default:
           return Response.json({
             type: 4,
