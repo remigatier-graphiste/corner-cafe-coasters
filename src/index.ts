@@ -8,7 +8,6 @@ export interface Env {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Si ce n'est pas une requête POST de Discord
     if (request.method !== 'POST') {
       return new Response('Corner Cafe Bot is running ☕', { status: 200 });
     }
@@ -22,14 +21,15 @@ export default {
       return new Response('Invalid JSON', { status: 400 });
     }
 
-    // 1. Réponse immédiate et obligatoire au test PING de Discord (Type 1)
+    // 1. PING de Discord (Type 1) : On répond immédiatement SANS vérification 
+    // pour valider l'URL sur le portail développeur sans blocage.
     if (interaction.type === 1) {
       return new Response(JSON.stringify({ type: 1 }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // 2. Vérification de la signature pour les commandes
+    // 2. Pour les commandes suivantes, on applique la sécurité
     const signature = request.headers.get('X-Signature-Ed25519') || request.headers.get('x-signature-ed25519');
     const timestamp = request.headers.get('X-Signature-Timestamp') || request.headers.get('x-signature-timestamp');
     const PUBLIC_KEY = '079042b35d5bd74036de2b8ef5b0e30015c34e6c313f212de226de7541fd7e76';
@@ -45,22 +45,11 @@ export default {
       return new Response('Invalid signature', { status: 401 });
     }
 
-    // Gestion de base des interactions (Commandes slash)
+    // Gestion des interactions (commandes slash)
     if (interaction.type === 2) {
-      const name = interaction.data?.name;
-      
-      switch (name) {
-        case 'quotidien':
-        case 'ouvrir':
-        case 'inventaire':
-          return new Response(JSON.stringify({ type: 4, data: { content: 'Commande reçue avec succès ! ☕' } }), {
-            headers: { 'Content-Type': 'application/json' }
-          });
-        default:
-          return new Response(JSON.stringify({ type: 4, data: { content: 'Commande inconnue 🤖', flags: 64 } }), {
-            headers: { 'Content-Type': 'application/json' }
-          });
-      }
+      return new Response(JSON.stringify({ type: 4, data: { content: 'Commande reçue avec succès ! ☕' } }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
     return new Response(JSON.stringify({ type: 1 }), {
