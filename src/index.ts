@@ -17,9 +17,11 @@ const signature = request.headers.get('X-Signature-Ed25519') || request.headers.
   const timestamp = request.headers.get('X-Signature-Timestamp') || request.headers.get('x-signature-timestamp');
   const bodyText = await request.text();
 
+  const PUBLIC_KEY = '079042b35d5bd74036de2b8ef5b0e30015c34e6c313f212de226de7541fd7e76';
+
   let isValid = false;
   try {
-    isValid = verifyKey(bodyText, signature || '', timestamp || '', env.DISCORD_PUBLIC_KEY);
+    isValid = verifyKey(bodyText, signature || '', timestamp || '', PUBLIC_KEY);
   } catch (e) {
     isValid = false;
   }
