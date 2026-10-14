@@ -51,7 +51,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Route magique pour enregistrer les commandes instantanément sur ton serveur
+    // Route d'enregistrement des commandes
     if (url.pathname === '/register-commandes') {
       const CLIENT_ID = "1559598773389500526";
       const GUILD_ID = "408413734894174228";
@@ -71,7 +71,7 @@ export default {
       });
 
       if (discordRes.ok) {
-        return new Response("✅ Commandes de serveur enregistrées instantanément ! Fais Ctrl+R sur Discord.");
+        return new Response("✅ Commandes de serveur enregistrées instantanément !");
       } else {
         const err = await discordRes.text();
         return new Response(`❌ Erreur Discord : ${err}`, { status: 400 });
@@ -152,6 +152,43 @@ export default {
           }
         }
 
+        case 'inventaire': {
+          const userId = interaction.member?.user?.id || interaction.user?.id;
+
+          try {
+            const { results } = await env.DB.prepare(
+              `SELECT i.coaster_id, i.finish, i.quantity, c.name 
+               FROM inventory i 
+               LEFT JOIN coasters c ON i.coaster_id = c.id 
+               WHERE i.user_id = ?`
+            ).bind(userId).all();
+
+            if (!results || results.length === 0) {
+              return Response.json({
+                type: 4,
+                data: { content: "☕ Ton inventaire de coasters est vide pour l'instant." }
+              });
+            }
+
+            let description = "**☕ Ton Inventaire de Coasters :**\n\n";
+            for (const row of results as any[]) {
+              const coasterName = row.name || row.coaster_id;
+              description += `- **${coasterName}** (\`ID: ${row.coaster_id}\`) [Finition: *${row.finish}*] : **x${row.quantity}**\n`;
+            }
+
+            return Response.json({
+              type: 4,
+              data: { content: description }
+            });
+
+          } catch (err: any) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ Erreur lors de la lecture de l'inventaire : ${err.message}`, flags: 64 }
+            });
+          }
+        }
+
         case 'drop': {
           if (!isAdmin) {
             return Response.json({
@@ -167,7 +204,6 @@ export default {
 
         case 'quotidien':
         case 'ouvrir':
-        case 'inventaire':
           return Response.json({
             type: 4,
             data: { content: `🎁 Commande /${name} enregistrée, bientôt disponible !` }
