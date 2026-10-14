@@ -51,16 +51,17 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Route magique pour enregistrer les commandes depuis le navigateur
+    // Route magique pour enregistrer les commandes instantanément sur ton serveur
     if (url.pathname === '/register-commandes') {
       const CLIENT_ID = "1559598773389500526";
+      const GUILD_ID = "408413734894174228";
       const token = env.DISCORD_TOKEN;
       
       if (!token) {
         return new Response("❌ Erreur : DISCORD_TOKEN manquant dans les secrets Cloudflare.", { status: 500 });
       }
 
-      const discordRes = await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/commands`, {
+      const discordRes = await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/guilds/${GUILD_ID}/commands`, {
         method: 'PUT',
         headers: {
           Authorization: `Bot ${token}`,
@@ -70,7 +71,7 @@ export default {
       });
 
       if (discordRes.ok) {
-        return new Response("✅ Commandes enregistrées avec succès sur Discord via le Worker ! Tu peux tester sur ton serveur.");
+        return new Response("✅ Commandes de serveur enregistrées instantanément ! Fais Ctrl+R sur Discord.");
       } else {
         const err = await discordRes.text();
         return new Response(`❌ Erreur Discord : ${err}`, { status: 400 });
