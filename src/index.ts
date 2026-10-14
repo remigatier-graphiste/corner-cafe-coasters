@@ -14,6 +14,19 @@ export default {
     }
 
     const bodyText = await request.text();
+    let interaction;
+    try {
+      interaction = JSON.parse(bodyText);
+    } catch (e) {
+      return new Response('Invalid JSON', { status: 400 });
+    }
+
+    // 1. Réponse immédiate au test de liaison de Discord (Ping -> Pong)
+    if (interaction.type === 1) {
+      return Response.json({ type: 1 });
+    }
+
+    // 2. Vérification de sécurité pour les commandes suivantes
     const signature = request.headers.get('X-Signature-Ed25519') || request.headers.get('x-signature-ed25519');
     const timestamp = request.headers.get('X-Signature-Timestamp') || request.headers.get('x-signature-timestamp');
     const PUBLIC_KEY = '079042b35d5bd74036de2b8ef5b0e30015c34e6c313f212de226de7541fd7e76';
@@ -27,12 +40,6 @@ export default {
 
     if (!signature || !timestamp || !isValid) {
       return new Response('Invalid signature', { status: 401 });
-    }
-
-    const interaction = JSON.parse(bodyText);
-
-    if (interaction.type === 1) {
-      return Response.json({ type: 1 });
     }
 
     if (interaction.type === 2) {
