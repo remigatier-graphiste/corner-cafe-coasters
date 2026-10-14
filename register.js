@@ -4,17 +4,17 @@ const CLIENT_ID = "1559598773389500526";
 const commands = [
   {
     name: 'donner',
-    description: 'Donner un coaster à un utilisateur (Admin)',
+    description: 'Donner un coaster a un utilisateur (Admin)',
     options: [
       {
         name: 'utilisateur',
-        description: 'Le membre à qui donner le coaster',
+        description: 'Membre cible',
         type: 6,
         required: true,
       },
       {
         name: 'coaster_id',
-        description: "L'ID du coaster à donner (ex: hiver-2027-001)",
+        description: 'ID du coaster (ex: hiver-2027-001)',
         type: 3,
         required: false,
       }
@@ -27,7 +27,7 @@ const commands = [
   },
   {
     name: 'quotidien',
-    description: 'Récupérer ton pack quotidien de coasters',
+    description: 'Recuperer ton pack quotidien de coasters',
     options: [],
   },
   {
