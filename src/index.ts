@@ -89,6 +89,16 @@ function getRarityInfo(rarity?: string): { circle: string, name: string } {
   return { circle: '🔘', name: rarity.charAt(0).toUpperCase() + rarity.slice(1) };
 }
 
+// Helper pour obtenir la date actuelle au format YYYY-MM-DD en heure française (Europe/Paris)
+function getFrenchDateString(): string {
+  return new Intl.DateTimeFormat('fr-CA', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -262,19 +272,16 @@ export default {
             await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
             
             const userRecord = await env.DB.prepare(`SELECT last_daily FROM users WHERE discord_id = ?`).bind(userId).first() as any;
-            const now = Date.now();
-            const lastDaily = userRecord?.last_daily ? parseInt(userRecord.last_daily) : 0;
-            const cooldown = 24 * 60 * 60 * 1000;
+            const todayFrench = getFrenchDateString();
 
-            if (now - lastDaily < cooldown) {
-              const remainingTime = Math.ceil((cooldown - (now - lastDaily)) / (1000 * 60 * 60));
+            if (userRecord?.last_daily === todayFrench) {
               return Response.json({
                 type: 4,
-                data: { content: `⏳ Tu as déjà récupéré ton pack quotidien ! Tu pourras en ravoir un dans environ **${remainingTime}h**.` }
+                data: { content: `⏳ Tu as déjà récupéré ton pack quotidien aujourd'hui ! Reviens **demain dès minuit** 🌙` }
               });
             }
 
-            await env.DB.prepare(`UPDATE users SET last_daily = ? WHERE discord_id = ?`).bind(now.toString(), userId).run();
+            await env.DB.prepare(`UPDATE users SET last_daily = ? WHERE discord_id = ?`).bind(todayFrench, userId).run();
 
             const updateRes = await env.DB.prepare(
               `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = 'sachet' AND set_id = 'general'`
