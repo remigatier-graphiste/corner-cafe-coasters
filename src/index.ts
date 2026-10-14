@@ -292,90 +292,99 @@ export default {
             });
           }
 
-          try {
-            const packRecord = await env.DB.prepare(
-              `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
-            ).bind(userId, packType).first() as any;
+          // Exécution en tâche de fond async pour éviter le timeout de 3 secondes de Discord
+          ctx.waitUntil((async () => {
+            try {
+              const packRecord = await env.DB.prepare(
+                `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
+              ).bind(userId, packType).first() as any;
 
-            if (!packRecord || packRecord.quantity <= 0) {
-              return Response.json({
-                type: 4,
-                data: { content: `❌ Tu ne possèdes aucun pack de ce type (\`${packType}\`). Récupère ton pack quotidien avec \`/quotidien\` !`, flags: 64 }
-              });
-            }
-
-            const packSizes: Record<string, number> = {
-              'sachet': 1,
-              'grand_sachet': 3,
-              'boite': 5,
-              'coffret': 10
-            };
-            const count = packSizes[packType] || 1;
-
-            const { results: allCoasters } = await env.DB.prepare(`SELECT * FROM coasters`).all();
-            if (!allCoasters || allCoasters.length === 0) {
-              return Response.json({
-                type: 4,
-                data: { content: "❌ Aucun coaster n'est enregistré dans la base de données.", flags: 64 }
-              });
-            }
-
-            await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
-
-            const pulledCoasters: any[] = [];
-            const dbStatements: D1PreparedStatement[] = [
-              env.DB.prepare(`UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`).bind(userId, packType)
-            ];
-
-            for (let i = 0; i < count; i++) {
-              const randomIndex = Math.floor(Math.random() * allCoasters.length);
-              const coaster = allCoasters[randomIndex] as any;
-              pulledCoasters.push(coaster);
-
-              dbStatements.push(
-                env.DB.prepare(`
-                  INSERT INTO inventory (user_id, coaster_id, finish, quantity) 
-                  VALUES (?, ?, 'normal', 1) 
-                  ON CONFLICT(user_id, coaster_id, finish) 
-                  DO UPDATE SET quantity = quantity + 1
-                `).bind(userId, coaster.id)
-              );
-            }
-
-            // Exécution groupée instantanée
-            await env.DB.batch(dbStatements);
-
-            const packNames: Record<string, string> = {
-              'sachet': 'Sachet',
-              'grand_sachet': 'Grand Sachet',
-              'boite': 'Boîte',
-              'coffret': 'Coffret'
-            };
-
-            const embed: any = {
-              title: `🎁 Ouverture d'un ${packNames[packType] || packType} !`,
-              description: `Tu as obtenu :\n\n` + pulledCoasters.map(c => `✨ **${c.name}** (\`${c.id}\`)${c.rarity ? ` [Rareté: *${c.rarity}*]` : ''}`).join('\n'),
-              color: 14897974 // Terracotta #E35336
-            };
-
-            const imageUrl = pulledCoasters[0]?.image || pulledCoasters[0]?.image_url;
-            if (imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('http')) {
-              embed.image = { url: imageUrl };
-            }
-
-            return Response.json({
-              type: 4,
-              data: {
-                embeds: [embed]
+              if (!packRecord || packRecord.quantity <= 0) {
+                await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ content: `❌ Tu ne possèdes aucun pack de ce type (\`${packType}\`). Récupère ton pack quotidien avec \`/quotidien\` !` })
+                });
+                return;
               }
-            });
 
-          } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur lors de l'ouverture du pack : ${err.message}`, flags: 64 }
-            });
-          }
+              const packSizes: Record<string, number> = {
+                'sachet': 1,
+                'grand_sachet': 3,
+                'boite': 5,
+                'coffret': 10
+              };
+              const count = packSizes[packType] || 1;
+
+              const { results: allCoasters } = await env.DB.prepare(`SELECT * FROM coasters`).all();
+              if (!allCoasters || allCoasters.length === 0) {
+                await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ content: "❌ Aucun coaster n'est enregistré dans la base de données." })
+                });
+                return;
+              }
+
+              await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
+
+              const pulledCoasters: any[] = [];
+              const dbStatements: D1PreparedStatement[] = [
+                env.DB.prepare(`UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`).bind(userId, packType)
+              ];
+
+              for (let i = 0; i < count; i++) {
+                const randomIndex = Math.floor(Math.random() * allCoasters.length);
+                const coaster = allCoasters[randomIndex] as any;
+                pulledCoasters.push(coaster);
+
+                dbStatements.push(
+                  env.DB.prepare(`
+                    INSERT INTO inventory (user_id, coaster_id, finish, quantity) 
+                    VALUES (?, ?, 'normal', 1) 
+                    ON CONFLICT(user_id, coaster_id, finish) 
+                    DO UPDATE SET quantity = quantity + 1
+                  `).bind(userId, coaster.id)
+                );
+              }
+
+              await env.DB.batch(dbStatements);
+
+              const packNames: Record<string, string> = {
+                'sachet': 'Sachet',
+                'grand_sachet': 'Grand Sachet',
+                'boite': 'Boîte',
+                'coffret': 'Coffret'
+              };
+
+              const embed: any = {
+                title: `🎁 Ouverture d'un ${packNames[packType] || packType} !`,
+                description: `Tu as obtenu :\n\n` + pulledCoasters.map(c => `✨ **${c.name || c.id}** (\`${c.id}\`)${c.rarity ? ` [Rareté: *${c.rarity}*]` : ''}`).join('\n'),
+                color: 14897974
+              };
+
+              const firstImg = pulledCoasters[0]?.image || pulledCoasters[0]?.image_url;
+              if (firstImg && typeof firstImg === 'string' && firstImg.startsWith('http')) {
+                embed.image = { url: firstImg };
+              }
+
+              await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: '', embeds: [embed] })
+              });
+
+            } catch (err: any) {
+              await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: `❌ Erreur lors de l'ouverture du pack : ${err.message}` })
+              });
+            }
+          })());
+
+          // Réponse instantanée à Discord (Type 5: DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE)
+          return Response.json({ type: 5 });
         }
 
         case 'inventaire': {
