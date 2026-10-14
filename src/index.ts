@@ -208,26 +208,18 @@ export default {
             }
 
             if (packType) {
-              // On gère la compatibilité avec la colonne set_id si elle existe
               const existingPack = await env.DB.prepare(
-                `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ?`
+                `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
               ).bind(targetUserId, packType).first() as any;
 
               if (existingPack) {
                 await env.DB.prepare(
-                  `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ?`
+                  `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
                 ).bind(targetUserId, packType).run();
               } else {
-                // Tentative avec set_id au cas où la colonne est requise dans la table
-                try {
-                  await env.DB.prepare(
-                    `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'general')`
-                  ).bind(targetUserId, packType).run();
-                } catch (innerErr) {
-                  await env.DB.prepare(
-                    `INSERT INTO user_packs (user_id, pack_type, quantity) VALUES (?, ?, 1)`
-                  ).bind(targetUserId, packType).run();
-                }
+                await env.DB.prepare(
+                  `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'general')`
+                ).bind(targetUserId, packType).run();
               }
 
               const packNames: Record<string, string> = {
@@ -272,23 +264,17 @@ export default {
             await env.DB.prepare(`UPDATE users SET last_daily = ? WHERE discord_id = ?`).bind(now.toString(), userId).run();
 
             const existingPack = await env.DB.prepare(
-              `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = 'sachet'`
+              `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = 'sachet' AND set_id = 'general'`
             ).bind(userId).first() as any;
 
             if (existingPack) {
               await env.DB.prepare(
-                `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = 'sachet'`
+                `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = 'sachet' AND set_id = 'general'`
               ).bind(userId).run();
             } else {
-              try {
-                await env.DB.prepare(
-                  `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, 'sachet', 1, 'general')`
-                ).bind(userId).run();
-              } catch (innerErr) {
-                await env.DB.prepare(
-                  `INSERT INTO user_packs (user_id, pack_type, quantity) VALUES (?, 'sachet', 1)`
-                ).bind(userId).run();
-              }
+              await env.DB.prepare(
+                `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, 'sachet', 1, 'general')`
+              ).bind(userId).run();
             }
 
             return Response.json({
@@ -315,7 +301,7 @@ export default {
 
           try {
             const packRecord = await env.DB.prepare(
-              `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ?`
+              `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
             ).bind(userId, packType).first() as any;
 
             if (!packRecord || packRecord.quantity <= 0) {
@@ -343,7 +329,7 @@ export default {
 
             // Décrémenter le pack
             await env.DB.prepare(
-              `UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ?`
+              `UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
             ).bind(userId, packType).run();
 
             await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
