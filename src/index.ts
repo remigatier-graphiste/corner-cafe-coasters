@@ -76,7 +76,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Route d'enregistrement des commandes (nettoyage des doublons globaux)
+    // Route d'enregistrement des commandes
     if (url.pathname === '/register-commandes') {
       const CLIENT_ID = "1559598773389500526";
       const GUILD_ID = "408413734894174228";
@@ -86,7 +86,6 @@ export default {
         return new Response("❌ Erreur : DISCORD_TOKEN manquant dans les secrets Cloudflare.", { status: 500 });
       }
 
-      // 1. Supprimer les commandes globales pour éliminer les doublons
       await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/commands`, {
         method: 'PUT',
         headers: {
@@ -96,7 +95,6 @@ export default {
         body: JSON.stringify([]),
       });
 
-      // 2. Enregistrer proprement sur le serveur
       const discordRes = await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/guilds/${GUILD_ID}/commands`, {
         method: 'PUT',
         headers: {
@@ -135,7 +133,6 @@ export default {
       return Response.json({ type: 1 });
     }
 
-    // Initialisation sécurisée des tables et du set par défaut
     try {
       await env.DB.prepare(`
         CREATE TABLE IF NOT EXISTS users (
@@ -189,9 +186,6 @@ export default {
 
           try {
             await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(targetUserId).run();
-            try {
-              await env.DB.prepare(`INSERT OR IGNORE INTO sets (id, name) VALUES ('general', 'Général')`).run();
-            } catch (err) {}
 
             if (coasterId) {
               const existing = await env.DB.prepare(
@@ -250,9 +244,6 @@ export default {
         case 'quotidien': {
           try {
             await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
-            try {
-              await env.DB.prepare(`INSERT OR IGNORE INTO sets (id, name) VALUES ('general', 'Général')`).run();
-            } catch (err) {}
             
             const userRecord = await env.DB.prepare(`SELECT last_daily FROM users WHERE discord_id = ?`).bind(userId).first() as any;
             const now = Date.now();
@@ -281,7 +272,7 @@ export default {
 
             return Response.json({
               type: 4,
-              data: { content: `🎉 Tu a récupéré ton **Sachet** quotidien ! Utilise \`/ouvrir\` pour l'ouvrir.` }
+              data: { content: `🎉 Tu as récupéré ton **Sachet** quotidien ! Utilise \`/ouvrir\` pour l'ouvrir.` }
             });
 
           } catch (err: any) {
@@ -329,33 +320,30 @@ export default {
               });
             }
 
-            // Décrémenter le pack
-            await env.DB.prepare(
-              `UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
-            ).bind(userId, packType).run();
-
             await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
 
             const pulledCoasters: any[] = [];
+            const dbStatements: D1PreparedStatement[] = [
+              env.DB.prepare(`UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`).bind(userId, packType)
+            ];
+
             for (let i = 0; i < count; i++) {
               const randomIndex = Math.floor(Math.random() * allCoasters.length);
               const coaster = allCoasters[randomIndex] as any;
               pulledCoasters.push(coaster);
 
-              const existingInv = await env.DB.prepare(
-                `SELECT quantity FROM inventory WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`
-              ).bind(userId, coaster.id).first() as any;
-
-              if (existingInv) {
-                await env.DB.prepare(
-                  `UPDATE inventory SET quantity = quantity + 1 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`
-                ).bind(userId, coaster.id).run();
-              } else {
-                await env.DB.prepare(
-                  `INSERT INTO inventory (user_id, coaster_id, finish, quantity) VALUES (?, ?, 'normal', 1)`
-                ).bind(userId, coaster.id).run();
-              }
+              dbStatements.push(
+                env.DB.prepare(`
+                  INSERT INTO inventory (user_id, coaster_id, finish, quantity) 
+                  VALUES (?, ?, 'normal', 1) 
+                  ON CONFLICT(user_id, coaster_id, finish) 
+                  DO UPDATE SET quantity = quantity + 1
+                `).bind(userId, coaster.id)
+              );
             }
+
+            // Exécution groupée instantanée
+            await env.DB.batch(dbStatements);
 
             const packNames: Record<string, string> = {
               'sachet': 'Sachet',
@@ -366,12 +354,12 @@ export default {
 
             const embed: any = {
               title: `🎁 Ouverture d'un ${packNames[packType] || packType} !`,
-              description: `Tu as obtenu :\n\n` + pulledCoasters.map(c => `✨ **${c.name}** (\`${c.id}\`) ${c.rarity ? `[Rareté: *${c.rarity}*]` : ''}`).join('\n'),
+              description: `Tu as obtenu :\n\n` + pulledCoasters.map(c => `✨ **${c.name}** (\`${c.id}\`)${c.rarity ? ` [Rareté: *${c.rarity}*]` : ''}`).join('\n'),
               color: 14897974 // Terracotta #E35336
             };
 
             const imageUrl = pulledCoasters[0]?.image || pulledCoasters[0]?.image_url;
-            if (imageUrl) {
+            if (imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('http')) {
               embed.image = { url: imageUrl };
             }
 
