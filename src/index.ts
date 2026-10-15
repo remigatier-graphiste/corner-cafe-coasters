@@ -86,6 +86,7 @@ function getRarityInfo(rarity?: string): { circle: string, name: string } {
   if (r.includes('liege') || r.includes('liège')) return { circle: '🟤', name: 'Liège' };
   if (r.includes('ceramique') || r.includes('céramique')) return { circle: '🔵', name: 'Céramique' };
   if (r.includes('metal') || r.includes('métal')) return { circle: '🟡', name: 'Métal' };
+  if (r.includes('diamant')) return { circle: '🟣', name: 'Diamant' };
   return { circle: '🔘', name: rarity.charAt(0).toUpperCase() + rarity.slice(1) };
 }
 
@@ -99,13 +100,13 @@ function getFrenchDateString(): string {
   }).format(new Date());
 }
 
-// Helper pour effectuer un tirage pondéré selon la colonne 'weight'
+// Helper pour effectuer un tirage pondéré selon la colonne 'weight' (supporte les décimaux)
 function getRandomWeightedCoaster(coasters: any[]): any {
-  const totalWeight = coasters.reduce((sum, c) => sum + (Number(c.weight) || 1), 0);
+  const totalWeight = coasters.reduce((sum, c) => sum + (parseFloat(c.weight) || 1), 0);
   let randomNum = Math.random() * totalWeight;
 
   for (const coaster of coasters) {
-    const weight = Number(coaster.weight) || 1;
+    const weight = parseFloat(coaster.weight) || 1;
     if (randomNum < weight) {
       return coaster;
     }
@@ -371,7 +372,6 @@ export default {
               ];
 
               for (let i = 0; i < count; i++) {
-                // Utilisation du tirage pondéré (weight)
                 const coaster = getRandomWeightedCoaster(allCoasters);
                 pulledCoasters.push(coaster);
 
@@ -500,7 +500,8 @@ export default {
               'Bois': 0,
               'Liège': 0,
               'Céramique': 0,
-              'Métal': 0
+              'Métal': 0,
+              'Diamant': 0
             };
 
             for (const row of coasters as any[]) {
@@ -539,7 +540,8 @@ export default {
               `🟢 **Bois** : ${rarityCounts['Bois'] || 0}`,
               `🟤 **Liège** : ${rarityCounts['Liège'] || 0}`,
               `🔵 **Céramique** : ${rarityCounts['Céramique'] || 0}`,
-              `🟡 **Métal** : ${rarityCounts['Métal'] || 0}`
+              `🟡 **Métal** : ${rarityCounts['Métal'] || 0}`,
+              `🟣 **Diamant** : ${rarityCounts['Diamant'] || 0}`
             ].join('\n');
 
             const embed: any = {
