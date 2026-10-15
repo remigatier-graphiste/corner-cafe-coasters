@@ -99,6 +99,21 @@ function getFrenchDateString(): string {
   }).format(new Date());
 }
 
+// Helper pour effectuer un tirage pondéré selon la colonne 'weight'
+function getRandomWeightedCoaster(coasters: any[]): any {
+  const totalWeight = coasters.reduce((sum, c) => sum + (Number(c.weight) || 1), 0);
+  let randomNum = Math.random() * totalWeight;
+
+  for (const coaster of coasters) {
+    const weight = Number(coaster.weight) || 1;
+    if (randomNum < weight) {
+      return coaster;
+    }
+    randomNum -= weight;
+  }
+  return coasters[0];
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -356,8 +371,8 @@ export default {
               ];
 
               for (let i = 0; i < count; i++) {
-                const randomIndex = Math.floor(Math.random() * allCoasters.length);
-                const coaster = allCoasters[randomIndex] as any;
+                // Utilisation du tirage pondéré (weight)
+                const coaster = getRandomWeightedCoaster(allCoasters);
                 pulledCoasters.push(coaster);
 
                 dbStatements.push(
