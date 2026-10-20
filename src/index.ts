@@ -77,17 +77,17 @@ const commands = [
   }
 ];
 
-// Helper pour associer un rond de couleur et le nom bien capitalisé de la rareté
+// Helper pour associer un émoji représentatif et le nom bien capitalisé de la rareté
 function getRarityInfo(rarity?: string): { circle: string, name: string } {
-  if (!rarity) return { circle: '🔘', name: 'Inconnue' };
+  if (!rarity) return { circle: '❓', name: 'Inconnue' };
   const r = rarity.toLowerCase().trim();
-  if (r.includes('carton')) return { circle: '⚪', name: 'Carton' };
-  if (r.includes('bois')) return { circle: '🟢', name: 'Bois' };
-  if (r.includes('liege') || r.includes('liège')) return { circle: '🟤', name: 'Liège' };
-  if (r.includes('ceramique') || r.includes('céramique')) return { circle: '🔵', name: 'Céramique' };
-  if (r.includes('metal') || r.includes('métal')) return { circle: '🟡', name: 'Métal' };
-  if (r.includes('diamant')) return { circle: '🟣', name: 'Diamant' };
-  return { circle: '🔘', name: rarity.charAt(0).toUpperCase() + rarity.slice(1) };
+  if (r.includes('carton')) return { circle: '🟤', name: 'Carton' };
+  if (r.includes('bois')) return { circle: '🪵', name: 'Bois' };
+  if (r.includes('ardoise')) return { circle: '⬛', name: 'Ardoise' };
+  if (r.includes('ceramique') || r.includes('céramique')) return { circle: '☕', name: 'Céramique' };
+  if (r.includes('metal') || r.includes('métal')) return { circle: '🪙', name: 'Métal' };
+  if (r.includes('diamant')) return { circle: '💎', name: 'Diamant' };
+  return { circle: '❓', name: rarity.charAt(0).toUpperCase() + rarity.slice(1) };
 }
 
 // Helper pour obtenir la date actuelle au format YYYY-MM-DD en heure française (Europe/Paris)
@@ -498,7 +498,7 @@ export default {
             const rarityCounts: Record<string, number> = {
               'Carton': 0,
               'Bois': 0,
-              'Liège': 0,
+              'Ardoise': 0,
               'Céramique': 0,
               'Métal': 0,
               'Diamant': 0
@@ -536,12 +536,12 @@ export default {
               `📦 **Total de cartes :** **${totalCards}** (avec doublons)`,
               ``,
               `🎨 **Cartes par rareté :**`,
-              `⚪ **Carton** : ${rarityCounts['Carton'] || 0}`,
-              `🟢 **Bois** : ${rarityCounts['Bois'] || 0}`,
-              `🟤 **Liège** : ${rarityCounts['Liège'] || 0}`,
-              `🔵 **Céramique** : ${rarityCounts['Céramique'] || 0}`,
-              `🟡 **Métal** : ${rarityCounts['Métal'] || 0}`,
-              `🟣 **Diamant** : ${rarityCounts['Diamant'] || 0}`
+              `🟤 **Carton** : ${rarityCounts['Carton'] || 0}`,
+              `🪵 **Bois** : ${rarityCounts['Bois'] || 0}`,
+              `⬛ **Ardoise** : ${rarityCounts['Ardoise'] || 0}`,
+              `☕ **Céramique** : ${rarityCounts['Céramique'] || 0}`,
+              `🪙 **Métal** : ${rarityCounts['Métal'] || 0}`,
+              `💎 **Diamant** : ${rarityCounts['Diamant'] || 0}`
             ].join('\n');
 
             const embed: any = {
