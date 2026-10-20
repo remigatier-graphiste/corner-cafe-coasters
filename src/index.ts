@@ -132,6 +132,7 @@ function getFrenchDateString(): string {
 
 // Helper pour effectuer un tirage pondéré selon la colonne 'weight' (supporte les décimaux)
 function getRandomWeightedCoaster(coasters: any[]): any {
+  if (!coasters || coasters.length === 0) return null;
   const totalWeight = coasters.reduce((sum, c) => sum + (parseFloat(c.weight) || 1), 0);
   let randomNum = Math.random() * totalWeight;
 
@@ -161,16 +162,7 @@ export default {
       await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/commands`, {
         method: 'PUT',
         headers: {
-          Authorization: `Bot ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify([]),
-      });
-
-      const discordRes = await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/guilds/${GUILD_ID}/commands`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bot ${token}`,
+          Authorization: `Bot ${token}`, 'Content-Type': 'application/json', }, body: JSON.stringify([]), });  const discordRes = await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/guilds/${GUILD_ID}/commands`, { method: 'PUT', headers: { Authorization: `Bot ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(commands),
@@ -237,7 +229,6 @@ export default {
         }
 
         try {
-          // Vérification des inventaires des deux joueurs
           const offerUserItem = await env.DB.prepare(
             `SELECT quantity FROM inventory WHERE user_id = ? AND coaster_id = ? AND quantity > 0`
           ).bind(offerUser, offerCoasterId).first() as any;
@@ -260,13 +251,9 @@ export default {
             });
           }
 
-          // Exécution de l'échange atomique (Transaction D1)
           await env.DB.batch([
-            // Retrait et ajout pour l'offreur
             env.DB.prepare(`UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`).bind(offerUser, offerCoasterId),
             env.DB.prepare(`INSERT INTO inventory (user_id, coaster_id, finish, quantity) VALUES (?, ?, 'normal', 1) ON CONFLICT(user_id, coaster_id, finish) DO UPDATE SET quantity = quantity + 1`).bind(offerUser, wantCoasterId),
-            
-            // Retrait et ajout pour l'accepteur
             env.DB.prepare(`UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`).bind(takerId, wantCoasterId),
             env.DB.prepare(`INSERT INTO inventory (user_id, coaster_id, finish, quantity) VALUES (?, ?, 'normal', 1) ON CONFLICT(user_id, coaster_id, finish) DO UPDATE SET quantity = quantity + 1`).bind(takerId, offerCoasterId)
           ]);
@@ -468,13 +455,34 @@ export default {
 
               await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
 
+              // FILTRES POUR LES GARANTIES DE RARETÉ PAR PACK
+              const slateOrBetter = allCoasters.filter((c: any) => {
+                const r = (c.rarity || '').toLowerCase();
+                return r.includes('ardoise') || r.includes('ceramique') || r.includes('céramique') || r.includes('metal') || r.includes('métal') || r.includes('diamant');
+              });
+
+              const ceramicOrBetter = allCoasters.filter((c: any) => {
+                const r = (c.rarity || '').toLowerCase();
+                return r.includes('ceramique') || r.includes('céramique') || r.includes('metal') || r.includes('métal') || r.includes('diamant');
+              });
+
               const pulledCoasters: any[] = [];
               const dbStatements: D1PreparedStatement[] = [
                 env.DB.prepare(`UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`).bind(userId, packType)
               ];
 
               for (let i = 0; i < count; i++) {
-                const coaster = getRandomWeightedCoaster(allCoasters);
+                let coaster: any;
+
+                // Application des garanties sur le dernier tirage du pack
+                if (packType === 'boite' && i === count - 1 && slateOrBetter.length > 0) {
+                  coaster = getRandomWeightedCoaster(slateOrBetter);
+                } else if (packType === 'coffret' && i === count - 1 && ceramicOrBetter.length > 0) {
+                  coaster = getRandomWeightedCoaster(ceramicOrBetter);
+                } else {
+                  coaster = getRandomWeightedCoaster(allCoasters);
+                }
+
                 pulledCoasters.push(coaster);
 
                 dbStatements.push(
@@ -674,7 +682,6 @@ export default {
           const wantCoasterId = options?.find((opt: any) => opt.name === 'coaster_desire')?.value;
 
           try {
-            // Vérifier que l'utilisateur possède bien le coaster qu'il propose
             const myItem = await env.DB.prepare(
               `SELECT i.quantity, c.name, c.rarity FROM inventory i LEFT JOIN coasters c ON i.coaster_id = c.id WHERE i.user_id = ? AND i.coaster_id = ? AND i.quantity > 0`
             ).bind(userId, myCoasterId).first() as any;
@@ -686,7 +693,6 @@ export default {
               });
             }
 
-            // Récupérer les infos du coaster désiré
             const wantItem = await env.DB.prepare(
               `SELECT name, rarity FROM coasters WHERE id = ?`
             ).bind(wantCoasterId).first() as any;
@@ -706,11 +712,11 @@ export default {
                          `_Si tu possèdes \`${wantCoasterId}\`, clique sur le bouton ci-dessous pour effectuer l'échange immédiatement !_`,
                 components: [
                   {
-                    type: 1, // ActionRow
+                    type: 1,
                     components: [
                       {
-                        type: 2, // Button
-                        style: 3, // Success (vert)
+                        type: 2,
+                        style: 3,
                         label: 'Accepter l\'échange 🤝',
                         custom_id: `accept_trade:${userId}:${myCoasterId}:${wantCoasterId}`
                       }
@@ -767,7 +773,6 @@ export default {
               packName = 'Coffret (10 coasters)';
             }
 
-            // Transaction : Retirer 5 copies et ajouter 1 pack
             const updatePackRes = await env.DB.prepare(
               `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
             ).bind(userId, rewardedPack).run();
@@ -782,7 +787,7 @@ export default {
               `UPDATE inventory SET quantity = quantity - 5 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`
             ).bind(userId, coasterId).run();
 
-            const { circle, name: rarityName } = getRarityInfo(item.rarity);
+            const { circle } = getRarityInfo(item.rarity);
 
             return Response.json({
               type: 4,
