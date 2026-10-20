@@ -74,6 +74,36 @@ const commands = [
     name: 'profil',
     description: 'Afficher ton profil et les statistiques de ta collection',
     options: [],
+  },
+  {
+    name: 'proposer',
+    description: 'Proposer un echange de coaster a la communaute',
+    options: [
+      {
+        name: 'mon_coaster',
+        description: 'ID du coaster que tu donnes',
+        type: 3,
+        required: true,
+      },
+      {
+        name: 'coaster_desire',
+        description: 'ID du coaster que tu veux recevoir',
+        type: 3,
+        required: true,
+      }
+    ],
+  },
+  {
+    name: 'changer',
+    description: 'Recycler 5 copies d un coaster en pack',
+    options: [
+      {
+        name: 'coaster_id',
+        description: 'ID du coaster a recycler (il faut 5 exemplaires)',
+        type: 3,
+        required: true,
+      }
+    ],
   }
 ];
 
@@ -188,6 +218,78 @@ export default {
       `).run();
     } catch (e) {}
 
+    // GESTION DES CLICS SUR LES BOUTONS (/proposer)
+    if (interaction.type === 3) {
+      const customId = interaction.data.custom_id;
+      const takerId = interaction.member?.user?.id || interaction.user?.id;
+
+      if (customId.startsWith('accept_trade:')) {
+        const parts = customId.split(':');
+        const offerUser = parts[1];
+        const offerCoasterId = parts[2];
+        const wantCoasterId = parts[3];
+
+        if (takerId === offerUser) {
+          return Response.json({
+            type: 4,
+            data: { content: "⛔ Tu ne peux pas accepter ton propre échange !", flags: 64 }
+          });
+        }
+
+        try {
+          // Vérification des inventaires des deux joueurs
+          const offerUserItem = await env.DB.prepare(
+            `SELECT quantity FROM inventory WHERE user_id = ? AND coaster_id = ? AND quantity > 0`
+          ).bind(offerUser, offerCoasterId).first() as any;
+
+          const takerItem = await env.DB.prepare(
+            `SELECT quantity FROM inventory WHERE user_id = ? AND coaster_id = ? AND quantity > 0`
+          ).bind(takerId, wantCoasterId).first() as any;
+
+          if (!offerUserItem || offerUserItem.quantity < 1) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ L'échange a échoué : l'auteur de la proposition ne possède plus le coaster \`${offerCoasterId}\`.`, flags: 64 }
+            });
+          }
+
+          if (!takerItem || takerItem.quantity < 1) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ Tu ne possèdes pas le coaster demandé (\`${wantCoasterId}\`) pour accepter cet échange !`, flags: 64 }
+            });
+          }
+
+          // Exécution de l'échange atomique (Transaction D1)
+          await env.DB.batch([
+            // Retrait et ajout pour l'offreur
+            env.DB.prepare(`UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`).bind(offerUser, offerCoasterId),
+            env.DB.prepare(`INSERT INTO inventory (user_id, coaster_id, finish, quantity) VALUES (?, ?, 'normal', 1) ON CONFLICT(user_id, coaster_id, finish) DO UPDATE SET quantity = quantity + 1`).bind(offerUser, wantCoasterId),
+            
+            // Retrait et ajout pour l'accepteur
+            env.DB.prepare(`UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`).bind(takerId, wantCoasterId),
+            env.DB.prepare(`INSERT INTO inventory (user_id, coaster_id, finish, quantity) VALUES (?, ?, 'normal', 1) ON CONFLICT(user_id, coaster_id, finish) DO UPDATE SET quantity = quantity + 1`).bind(takerId, offerCoasterId)
+          ]);
+
+          return Response.json({
+            type: 4,
+            data: { 
+              content: `🤝 **Échange réussi !** <@${takerId}> a accepté l'offre de <@${offerUser}>.\n\n` +
+                       `• <@${offerUser}> reçoit \`${wantCoasterId}\`\n` +
+                       `• <@${takerId}> reçoit \`${offerCoasterId}\``
+            }
+          });
+
+        } catch (err: any) {
+          return Response.json({
+            type: 4,
+            data: { content: `❌ Erreur lors du traitement de l'échange : ${err.message}`, flags: 64 }
+          });
+        }
+      }
+    }
+
+    // GESTION DES COMMANDES SLASH
     if (interaction.type === 2) {
       const { name, options } = interaction.data;
       const memberRoles = interaction.member?.roles || [];
@@ -563,6 +665,136 @@ export default {
             return Response.json({
               type: 4,
               data: { content: `❌ Erreur lors de la lecture du profil : ${err.message}`, flags: 64 }
+            });
+          }
+        }
+
+        case 'proposer': {
+          const myCoasterId = options?.find((opt: any) => opt.name === 'mon_coaster')?.value;
+          const wantCoasterId = options?.find((opt: any) => opt.name === 'coaster_desire')?.value;
+
+          try {
+            // Vérifier que l'utilisateur possède bien le coaster qu'il propose
+            const myItem = await env.DB.prepare(
+              `SELECT i.quantity, c.name, c.rarity FROM inventory i LEFT JOIN coasters c ON i.coaster_id = c.id WHERE i.user_id = ? AND i.coaster_id = ? AND i.quantity > 0`
+            ).bind(userId, myCoasterId).first() as any;
+
+            if (!myItem || myItem.quantity < 1) {
+              return Response.json({
+                type: 4,
+                data: { content: `❌ Tu ne possèdes pas le coaster \`${myCoasterId}\` dans ton inventaire !`, flags: 64 }
+              });
+            }
+
+            // Récupérer les infos du coaster désiré
+            const wantItem = await env.DB.prepare(
+              `SELECT name, rarity FROM coasters WHERE id = ?`
+            ).bind(wantCoasterId).first() as any;
+
+            const myRarity = getRarityInfo(myItem.rarity);
+            const wantRarity = getRarityInfo(wantItem?.rarity);
+
+            const offerName = myItem.name || myCoasterId;
+            const wantName = wantItem?.name || wantCoasterId;
+
+            return Response.json({
+              type: 4,
+              data: {
+                content: `🔄 **Proposition d'Échange Public** par <@${userId}> !\n\n` +
+                         `• **Donne :** ${myRarity.circle} **[${myRarity.name}]** **${offerName}** (\`${myCoasterId}\`)\n` +
+                         `• **Demande :** ${wantRarity.circle} **[${wantRarity.name}]** **${wantName}** (\`${wantCoasterId}\`)\n\n` +
+                         `_Si tu possèdes \`${wantCoasterId}\`, clique sur le bouton ci-dessous pour effectuer l'échange immédiatement !_`,
+                components: [
+                  {
+                    type: 1, // ActionRow
+                    components: [
+                      {
+                        type: 2, // Button
+                        style: 3, // Success (vert)
+                        label: 'Accepter l\'échange 🤝',
+                        custom_id: `accept_trade:${userId}:${myCoasterId}:${wantCoasterId}`
+                      }
+                    ]
+                  }
+                ]
+              }
+            });
+
+          } catch (err: any) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ Erreur lors de la création de l'échange : ${err.message}`, flags: 64 }
+            });
+          }
+        }
+
+        case 'changer': {
+          const coasterId = options?.find((opt: any) => opt.name === 'coaster_id')?.value;
+
+          try {
+            const item = await env.DB.prepare(
+              `SELECT i.quantity, c.name, c.rarity FROM inventory i LEFT JOIN coasters c ON i.coaster_id = c.id WHERE i.user_id = ? AND i.coaster_id = ?`
+            ).bind(userId, coasterId).first() as any;
+
+            if (!item || item.quantity < 5) {
+              const qty = item?.quantity || 0;
+              return Response.json({
+                type: 4,
+                data: { content: `❌ Tu n'as pas assez d'exemplaires de \`${coasterId}\` ! (Possédés : **${qty}/5**)`, flags: 64 }
+              });
+            }
+
+            const rarityLower = (item.rarity || '').toLowerCase().trim();
+
+            if (rarityLower.includes('diamant')) {
+              return Response.json({
+                type: 4,
+                data: { content: `⛔ Les coasters Diamant sont trop précieux pour être recyclés !`, flags: 64 }
+              });
+            }
+
+            let rewardedPack = 'sachet';
+            let packName = 'Sachet (1 coaster)';
+
+            if (rarityLower.includes('bois')) {
+              rewardedPack = 'grand_sachet';
+              packName = 'Grand Sachet (3 coasters)';
+            } else if (rarityLower.includes('ardoise')) {
+              rewardedPack = 'boite';
+              packName = 'Boîte (5 coasters)';
+            } else if (rarityLower.includes('ceramique') || rarityLower.includes('céramique') || rarityLower.includes('metal') || rarityLower.includes('métal')) {
+              rewardedPack = 'coffret';
+              packName = 'Coffret (10 coasters)';
+            }
+
+            // Transaction : Retirer 5 copies et ajouter 1 pack
+            const updatePackRes = await env.DB.prepare(
+              `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
+            ).bind(userId, rewardedPack).run();
+
+            if (!updatePackRes.meta.changes || updatePackRes.meta.changes === 0) {
+              await env.DB.prepare(
+                `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'general')`
+              ).bind(userId, rewardedPack).run();
+            }
+
+            await env.DB.prepare(
+              `UPDATE inventory SET quantity = quantity - 5 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`
+            ).bind(userId, coasterId).run();
+
+            const { circle, name: rarityName } = getRarityInfo(item.rarity);
+
+            return Response.json({
+              type: 4,
+              data: {
+                content: `♻️ **Recyclage réussi !** Tu as échangé 5x ${circle} **${item.name || coasterId}** contre 1x **${packName}** ! 🎉`
+              }
+            });
+
+          } catch (err: any) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ Erreur lors du recyclage : ${err.message}`, flags: 64 }
             });
           }
         }
