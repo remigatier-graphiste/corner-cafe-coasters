@@ -38,11 +38,6 @@ const commands = [
     ],
   },
   {
-    name: 'drop',
-    description: 'Lancer un drop de coasters (Admin)',
-    options: [],
-  },
-  {
     name: 'quotidien',
     description: 'Recuperer ton pack Sachet quotidien',
     options: [],
@@ -162,7 +157,16 @@ export default {
       await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/commands`, {
         method: 'PUT',
         headers: {
-          Authorization: `Bot ${token}`, 'Content-Type': 'application/json', }, body: JSON.stringify([]), });  const discordRes = await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/guilds/${GUILD_ID}/commands`, { method: 'PUT', headers: { Authorization: `Bot ${token}`,
+          Authorization: `Bot ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([]),
+      });
+
+      const discordRes = await fetch(`https://discord.com/api/v10/applications/${CLIENT_ID}/guilds/${GUILD_ID}/commands`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bot ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(commands),
@@ -455,7 +459,6 @@ export default {
 
               await env.DB.prepare(`INSERT OR IGNORE INTO users (discord_id) VALUES (?)`).bind(userId).run();
 
-              // FILTRES POUR LES GARANTIES DE RARETÉ PAR PACK
               const slateOrBetter = allCoasters.filter((c: any) => {
                 const r = (c.rarity || '').toLowerCase();
                 return r.includes('ardoise') || r.includes('ceramique') || r.includes('céramique') || r.includes('metal') || r.includes('métal') || r.includes('diamant');
@@ -474,7 +477,6 @@ export default {
               for (let i = 0; i < count; i++) {
                 let coaster: any;
 
-                // Application des garanties sur le dernier tirage du pack
                 if (packType === 'boite' && i === count - 1 && slateOrBetter.length > 0) {
                   coaster = getRandomWeightedCoaster(slateOrBetter);
                 } else if (packType === 'coffret' && i === count - 1 && ceramicOrBetter.length > 0) {
@@ -802,19 +804,6 @@ export default {
               data: { content: `❌ Erreur lors du recyclage : ${err.message}`, flags: 64 }
             });
           }
-        }
-
-        case 'drop': {
-          if (!isAdmin) {
-            return Response.json({
-              type: 4,
-              data: { content: "⛔ Tu n'as pas les permissions pour utiliser cette commande.", flags: 64 }
-            });
-          }
-          return Response.json({
-            type: 4,
-            data: { content: "☕ [Admin] Commande /drop en cours de configuration..." }
-          });
         }
 
         default:
