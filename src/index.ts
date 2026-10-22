@@ -800,6 +800,55 @@ export default {
           }
         }
 
+        case 'cadeau': {
+          const targetUserId = options?.find((opt: any) => opt.name === 'utilisateur')?.value;
+          const coasterId = options?.find((opt: any) => opt.name === 'coaster_id')?.value;
+
+          try {
+            await registerUserAndGiveRole(userId, guildId, env);
+            await registerUserAndGiveRole(targetUserId, guildId, env);
+
+            if (userId === targetUserId) {
+              return Response.json({
+                type: 4,
+                data: { content: "⛔ Tu ne peux pas t'offrir un cadeau à toi-même !", flags: 64 }
+              });
+            }
+
+            const userItem = await env.DB.prepare(
+              `SELECT i.quantity, c.name, c.rarity FROM inventory i LEFT JOIN coasters c ON i.coaster_id = c.id WHERE i.user_id = ? AND i.coaster_id = ? AND i.quantity > 0`
+            ).bind(userId, coasterId).first() as any;
+
+            if (!userItem || userItem.quantity < 1) {
+              return Response.json({
+                type: 4,
+                data: { content: `❌ Tu ne possèdes pas le coaster \`${coasterId}\` !`, flags: 64 }
+              });
+            }
+
+            await env.DB.batch([
+              env.DB.prepare(`UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`).bind(userId, coasterId),
+              env.DB.prepare(`INSERT INTO inventory (user_id, coaster_id, finish, quantity) VALUES (?, ?, 'normal', 1) ON CONFLICT(user_id, coaster_id, finish) DO UPDATE SET quantity = quantity + 1`).bind(targetUserId, coasterId)
+            ]);
+
+            const { circle, name: rarityName } = getRarityInfo(userItem.rarity);
+            const coasterName = userItem.name || coasterId;
+
+            return Response.json({
+              type: 4,
+              data: {
+                content: `🎁 **Cadeau envoyé !** <@${userId}> a offert le coaster ${circle} **[${rarityName}]** **${coasterName}** (\`${coasterId}\`) à <@${targetUserId}> ! 🎉`
+              }
+            });
+
+          } catch (err: any) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ Erreur cadeau : ${err.message}`, flags: 64 }
+            });
+          }
+        }
+
         case 'proposer': {
           const myCoasterId = options?.find((opt: any) => opt.name === 'mon_coaster')?.value;
           const wantCoasterId = options?.find((opt: any) => opt.name === 'coaster_desire')?.value;
