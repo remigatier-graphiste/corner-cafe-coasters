@@ -189,7 +189,6 @@ function getFrenchDateString(date: Date = new Date()): string {
   }).format(date);
 }
 
-// Renvoie un identifiant unique du créneau actuel (ex: "2026-10-22-14h" ou "2026-10-22-02h")
 function getCurrentDropSlot(): { slotId: string, currentDateStr: string } {
   const now = new Date();
   const parts = new Intl.DateTimeFormat('fr-FR', {
@@ -212,7 +211,6 @@ function getCurrentDropSlot(): { slotId: string, currentDateStr: string } {
   if (hour >= 14) {
     slotName = '14h';
   } else if (hour < 2) {
-    // Si il est entre 00h et 02h du matin, on appartient au créneau de 14h de la veille
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const yStr = getFrenchDateString(yesterday);
     return { slotId: `${yStr}-14h`, currentDateStr };
@@ -526,17 +524,14 @@ export default {
             if (!lastDate) {
               streak = 1;
             } else if (lastDate === currentDateStr) {
-              // Deuxième drop de la journée : streak conservée intacte
               streak = Math.max(1, streak);
             } else {
               const yesterday = new Date(new Date().getTime() - 24 * 60 * 60 * 1000);
               const yesterdayStr = getFrenchDateString(yesterday);
 
               if (lastDate === yesterdayStr) {
-                // Participation le jour précédent : streak + 1
                 streak += 1;
               } else {
-                // Plus d'un jour d'absence : réinitialisation de la streak
                 streak = 1;
               }
             }
@@ -774,24 +769,16 @@ export default {
             }
 
             const completionPercent = totalExisting > 0 ? Math.round((uniqueCards / totalExisting) * 100) : 0;
-
-            let rankTitle = "🌱 Débutant Curieux";
-            if (completionPercent >= 100) rankTitle = "👑 Maître du Café (Origins Complété !)";
-            else if (completionPercent >= 75) rankTitle = "🌟 Collectionneur Expert";
-            else if (completionPercent >= 40) rankTitle = "☕ Amateur Éclairé";
-            else if (completionPercent >= 20) rankTitle = "☕ Apprenti Barista";
-
             const userObj = interaction.member?.user || interaction.user;
             const userName = userObj?.username || "Barista";
 
             const profileDesc = [
-              `**Statut :** ${rankTitle}`,
               `🔥 **Série en cours :** **${userRecord?.streak_count || 0} jour(s)** consécutifs`,
               ``,
               `📊 **Complétion (Origins) :** **${uniqueCards} / ${totalExisting}** uniques (${completionPercent}%)`,
               `📦 **Total de cartes :** **${totalCards}** (avec doublons)`,
               ``,
-              `🎨 **Détail par rareté :**`,
+              `**Détail par rareté :**`,
               `🟤 **Carton** : ${rarityCounts['Carton'] || 0}`,
               `🪵 **Bois** : ${rarityCounts['Bois'] || 0}`,
               `⬛ **Ardoise** : ${rarityCounts['Ardoise'] || 0}`,
@@ -829,13 +816,11 @@ export default {
               return Response.json({ type: 4, data: { content: "❌ Tu dois spécifier exactement 5 coasters !", flags: 64 } });
             }
 
-            // Compter combien d'exemplaires de chaque ID sont demandés au recyclage
             const requestedCounts: Record<string, number> = {};
             for (const id of ids) {
               requestedCounts[id] = (requestedCounts[id] || 0) + 1;
             }
 
-            // Vérifier la présence des coasters et la sécurité doublon (il faut posséder au moins requested + 1 exemplaires)
             const coastersInfo: any[] = [];
             for (const [id, countNeeded] of Object.entries(requestedCounts)) {
               const item = await env.DB.prepare(
@@ -856,7 +841,6 @@ export default {
               coastersInfo.push({ id, countNeeded, rarity: item.rarity, name: item.name });
             }
 
-            // Vérification que tous les coasters sont de la MÊME rareté
             const firstCoasterRarity = (coastersInfo[0].rarity || '').toLowerCase().trim();
             for (const c of coastersInfo) {
               const r = (c.rarity || '').toLowerCase().trim();
@@ -886,7 +870,6 @@ export default {
               packName = 'Coffret (10 coasters)';
             }
 
-            // Déduire les 5 coasters et ajouter le pack
             const statements: D1PreparedStatement[] = [];
             for (const [id, count] of Object.entries(requestedCounts)) {
               statements.push(
@@ -908,20 +891,3 @@ export default {
             return Response.json({
               type: 4,
               data: {
-                content: `♻️ **Recyclage réussi !** Tu as recyclé 5x coasters ${circle} contre 1x **${packName}** (Origins) ! 🎉`
-              }
-            });
-
-          } catch (err: any) {
-            return Response.json({ type: 4, data: { content: `❌ Erreur recyclage : ${err.message}`, flags: 64 } });
-          }
-        }
-
-        default:
-          return Response.json({ type: 4, data: { content: "Commande inconnue 🤖", flags: 64 } });
-      }
-    }
-
-    return Response.json({ type: 1 });
-  }
-};
