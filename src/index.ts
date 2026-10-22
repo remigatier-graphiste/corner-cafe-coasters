@@ -87,8 +87,8 @@ const commands = [
     ],
   },
   {
-    name: 'quotidien',
-    description: 'Recuperer ton pack Sachet quotidien',
+    name: 'drop',
+    description: 'Recuperer ton pack du service (Resets a 02h et 14h)',
     options: [],
   },
   {
@@ -116,7 +116,7 @@ const commands = [
   },
   {
     name: 'profil',
-    description: 'Afficher ton profil et les statistiques de ta collection',
+    description: 'Afficher ton profil, ta streak et les statistiques de ta collection',
     options: [],
   },
   {
@@ -157,14 +157,13 @@ const commands = [
   },
   {
     name: 'changer',
-    description: 'Recycler 5 copies d un coaster en pack',
+    description: 'Recycler 5 coasters de meme rarete en pack',
     options: [
-      {
-        name: 'coaster_id',
-        description: 'ID du coaster a recycler (il faut 5 exemplaires)',
-        type: 3,
-        required: true,
-      }
+      { name: 'coaster_1', description: 'ID du 1er coaster à recycler', type: 3, required: true },
+      { name: 'coaster_2', description: 'ID du 2ème coaster à recycler', type: 3, required: true },
+      { name: 'coaster_3', description: 'ID du 3ème coaster à recycler', type: 3, required: true },
+      { name: 'coaster_4', description: 'ID du 4ème coaster à recycler', type: 3, required: true },
+      { name: 'coaster_5', description: 'ID du 5ème coaster à recycler', type: 3, required: true },
     ],
   }
 ];
@@ -181,13 +180,45 @@ function getRarityInfo(rarity?: string): { circle: string, name: string } {
   return { circle: '❓', name: rarity.charAt(0).toUpperCase() + rarity.slice(1) };
 }
 
-function getFrenchDateString(): string {
+function getFrenchDateString(date: Date = new Date()): string {
   return new Intl.DateTimeFormat('fr-CA', {
     timeZone: 'Europe/Paris',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
-  }).format(new Date());
+  }).format(date);
+}
+
+// Renvoie un identifiant unique du créneau actuel (ex: "2026-10-22-14h" ou "2026-10-22-02h")
+function getCurrentDropSlot(): { slotId: string, currentDateStr: string } {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('fr-FR', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hour12: false
+  }).formatToParts(now);
+
+  const year = parts.find(p => p.type === 'year')?.value || '';
+  const month = parts.find(p => p.type === 'month')?.value || '';
+  const day = parts.find(p => p.type === 'day')?.value || '';
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+
+  const currentDateStr = `${year}-${month}-${day}`;
+  
+  let slotName = '02h';
+  if (hour >= 14) {
+    slotName = '14h';
+  } else if (hour < 2) {
+    // Si il est entre 00h et 02h du matin, on appartient au créneau de 14h de la veille
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const yStr = getFrenchDateString(yesterday);
+    return { slotId: `${yStr}-14h`, currentDateStr };
+  }
+
+  return { slotId: `${currentDateStr}-${slotName}`, currentDateStr };
 }
 
 function getRandomWeightedCoaster(coasters: any[]): any {
@@ -209,7 +240,7 @@ async function registerUserAndGiveRole(userId: string, guildId: string, env: Env
   const existing = await env.DB.prepare(`SELECT discord_id FROM users WHERE discord_id = ?`).bind(userId).first();
   
   if (!existing) {
-    await env.DB.prepare(`INSERT INTO users (discord_id) VALUES (?)`).bind(userId).run();
+    await env.DB.prepare(`INSERT INTO users (discord_id, streak_count) VALUES (?, 0)`).bind(userId).run();
 
     const roleId = env.PLAYER_ROLE_ID;
     const token = env.DISCORD_TOKEN;
@@ -294,15 +325,18 @@ export default {
       await env.DB.prepare(`
         CREATE TABLE IF NOT EXISTS users (
           discord_id TEXT PRIMARY KEY,
-          last_daily TEXT
+          last_daily TEXT,
+          last_drop_date TEXT,
+          streak_count INTEGER DEFAULT 0
         )
       `).run();
 
       await env.DB.prepare(`
-        INSERT OR IGNORE INTO sets (id, name) VALUES ('general', 'Général')
+        INSERT OR IGNORE INTO sets (id, name) VALUES ('origins', 'Origins')
       `).run();
     } catch (e) {}
 
+    // INTERACTION BOUTON
     if (interaction.type === 3) {
       const customId = interaction.data.custom_id;
       const takerId = interaction.member?.user?.id || interaction.user?.id;
@@ -371,6 +405,7 @@ export default {
       }
     }
 
+    // COMMANDES SLASH
     if (interaction.type === 2) {
       const { name, options } = interaction.data;
       const memberRoles = interaction.member?.roles || [];
@@ -381,23 +416,11 @@ export default {
 
       switch (name) {
         case 'donner': {
-          if (!isAdmin) {
-            return Response.json({
-              type: 4,
-              data: { content: "⛔ Tu n'as pas les permissions.", flags: 64 }
-            });
-          }
+          if (!isAdmin) return Response.json({ type: 4, data: { content: "⛔ Permissions insuffisantes.", flags: 64 } });
 
           const targetUserId = options?.find((opt: any) => opt.name === 'utilisateur')?.value;
           const coasterId = options?.find((opt: any) => opt.name === 'coaster_id')?.value;
           const packType = options?.find((opt: any) => opt.name === 'pack')?.value;
-
-          if (!targetUserId) {
-            return Response.json({
-              type: 4,
-              data: { content: "❌ Spécifie un utilisateur cible.", flags: 64 }
-            });
-          }
 
           try {
             await registerUserAndGiveRole(targetUserId, guildId, env);
@@ -408,49 +431,26 @@ export default {
                  ON CONFLICT(user_id, coaster_id, finish) DO UPDATE SET quantity = quantity + 1`
               ).bind(targetUserId, coasterId).run();
 
-              return Response.json({
-                type: 4,
-                data: { content: `☕ Succès ! Le coaster \`${coasterId}\` a été ajouté à <@${targetUserId}>.` }
-              });
+              return Response.json({ type: 4, data: { content: `☕ Le coaster \`${coasterId}\` a été donné à <@${targetUserId}>.` } });
             }
 
             if (packType) {
-              const updateRes = await env.DB.prepare(
-                `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
+              await env.DB.prepare(
+                `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'origins')
+                 ON CONFLICT(user_id, pack_type, set_id) DO UPDATE SET quantity = quantity + 1`
               ).bind(targetUserId, packType).run();
 
-              if (!updateRes.meta.changes || updateRes.meta.changes === 0) {
-                await env.DB.prepare(
-                  `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'general')`
-                ).bind(targetUserId, packType).run();
-              }
-
-              const packNames: Record<string, string> = {
-                'sachet': 'Sachet', 'grand_sachet': 'Grand Sachet', 'boite': 'Boîte', 'coffret': 'Coffret'
-              };
-
-              return Response.json({
-                type: 4,
-                data: { content: `🎁 Succès ! Un pack **${packNames[packType] || packType}** a été offert à <@${targetUserId}>.` }
-              });
+              return Response.json({ type: 4, data: { content: `🎁 Un pack **${packType}** a été offert à <@${targetUserId}>.` } });
             }
 
           } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur : ${err.message}`, flags: 64 }
-            });
+            return Response.json({ type: 4, data: { content: `❌ Erreur : ${err.message}`, flags: 64 } });
           }
           break;
         }
 
         case 'retirer': {
-          if (!isAdmin) {
-            return Response.json({
-              type: 4,
-              data: { content: "⛔ Tu n'as pas les permissions.", flags: 64 }
-            });
-          }
+          if (!isAdmin) return Response.json({ type: 4, data: { content: "⛔ Permissions insuffisantes.", flags: 64 } });
 
           const targetUserId = options?.find((opt: any) => opt.name === 'utilisateur')?.value;
           const coasterId = options?.find((opt: any) => opt.name === 'coaster_id')?.value;
@@ -458,192 +458,143 @@ export default {
 
           try {
             if (coasterId) {
-              await env.DB.prepare(
-                `UPDATE inventory SET quantity = MAX(0, quantity - 1) WHERE user_id = ? AND coaster_id = ?`
-              ).bind(targetUserId, coasterId).run();
-
-              return Response.json({
-                type: 4,
-                data: { content: `🧹 Un exemplaire de \`${coasterId}\` a été retiré de <@${targetUserId}>.` }
-              });
+              await env.DB.prepare(`UPDATE inventory SET quantity = MAX(0, quantity - 1) WHERE user_id = ? AND coaster_id = ?`).bind(targetUserId, coasterId).run();
+              return Response.json({ type: 4, data: { content: `🧹 Un exemplaire de \`${coasterId}\` retiré à <@${targetUserId}>.` } });
             }
 
             if (packType) {
-              await env.DB.prepare(
-                `UPDATE user_packs SET quantity = MAX(0, quantity - 1) WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
-              ).bind(targetUserId, packType).run();
-
-              return Response.json({
-                type: 4,
-                data: { content: `🧹 Un pack \`${packType}\` a été retiré de <@${targetUserId}>.` }
-              });
+              await env.DB.prepare(`UPDATE user_packs SET quantity = MAX(0, quantity - 1) WHERE user_id = ? AND pack_type = ? AND set_id = 'origins'`).bind(targetUserId, packType).run();
+              return Response.json({ type: 4, data: { content: `🧹 Un pack \`${packType}\` retiré à <@${targetUserId}>.` } });
             }
 
           } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur : ${err.message}`, flags: 64 }
-            });
+            return Response.json({ type: 4, data: { content: `❌ Erreur : ${err.message}`, flags: 64 } });
           }
           break;
         }
 
         case 'event': {
-          if (!isAdmin) {
-            return Response.json({
-              type: 4,
-              data: { content: "⛔ Tu n'as pas les permissions.", flags: 64 }
-            });
-          }
+          if (!isAdmin) return Response.json({ type: 4, data: { content: "⛔ Permissions insuffisantes.", flags: 64 } });
 
           const packType = options?.find((opt: any) => opt.name === 'pack')?.value;
 
           try {
             const { results: allUsers } = await env.DB.prepare(`SELECT discord_id FROM users`).all();
-
             if (!allUsers || allUsers.length === 0) {
-              return Response.json({
-                type: 4,
-                data: { content: "❌ Aucun utilisateur dans la BDD.", flags: 64 }
-              });
+              return Response.json({ type: 4, data: { content: "❌ Aucun utilisateur enregistré.", flags: 64 } });
             }
 
-            const statements: D1PreparedStatement[] = [];
-            for (const u of allUsers as any[]) {
-              statements.push(
-                env.DB.prepare(
-                  `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'general')
-                   ON CONFLICT(user_id, pack_type, set_id) DO UPDATE SET quantity = quantity + 1`
-                ).bind(u.discord_id, packType)
-              );
-            }
+            const statements: D1PreparedStatement[] = allUsers.map((u: any) =>
+              env.DB.prepare(
+                `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'origins')
+                 ON CONFLICT(user_id, pack_type, set_id) DO UPDATE SET quantity = quantity + 1`
+              ).bind(u.discord_id, packType)
+            );
 
             await env.DB.batch(statements);
 
+            return Response.json({
+              type: 4,
+              data: { content: `🎉 **ÉVÉNEMENT DU CORNER CAFE !** Un pack **${packType}** a été offert à **${allUsers.length}** joueurs ! 🎁` }
+            });
+
+          } catch (err: any) {
+            return Response.json({ type: 4, data: { content: `❌ Erreur : ${err.message}`, flags: 64 } });
+          }
+        }
+
+        case 'drop': {
+          try {
+            await registerUserAndGiveRole(userId, guildId, env);
+
+            const { slotId, currentDateStr } = getCurrentDropSlot();
+
+            const userRecord = await env.DB.prepare(
+              `SELECT last_daily, last_drop_date, streak_count FROM users WHERE discord_id = ?`
+            ).bind(userId).first() as any;
+
+            if (userRecord?.last_daily === slotId) {
+              return Response.json({
+                type: 4,
+                data: { content: `⏳ Tu as déjà récupéré ton pack pour ce créneau ! Prochain réapprovisionnement à **14h00** ou **02h00** ☕` }
+              });
+            }
+
+            let streak = userRecord?.streak_count || 0;
+            const lastDate = userRecord?.last_drop_date;
+
+            if (!lastDate) {
+              streak = 1;
+            } else if (lastDate === currentDateStr) {
+              // Deuxième drop de la journée : streak conservée intacte
+              streak = Math.max(1, streak);
+            } else {
+              const yesterday = new Date(new Date().getTime() - 24 * 60 * 60 * 1000);
+              const yesterdayStr = getFrenchDateString(yesterday);
+
+              if (lastDate === yesterdayStr) {
+                // Participation le jour précédent : streak + 1
+                streak += 1;
+              } else {
+                // Plus d'un jour d'absence : réinitialisation de la streak
+                streak = 1;
+              }
+            }
+
+            let rewardedPack = 'sachet';
+            let bonusMsg = '';
+
+            if (streak === 14) {
+              rewardedPack = 'boite';
+              bonusMsg = ` 🔥 **STREAK EXCEPTIONNELLE DE 14 JOURS !** Tu débloques une **Boîte** (5 coasters) !`;
+            } else if (streak === 7) {
+              rewardedPack = 'grand_sachet';
+              bonusMsg = ` 🔥 **STREAK DE 7 JOURS !** Tu débloques un **Grand Sachet** (3 coasters) !`;
+            }
+
+            await env.DB.prepare(
+              `UPDATE users SET last_daily = ?, last_drop_date = ?, streak_count = ? WHERE discord_id = ?`
+            ).bind(slotId, currentDateStr, streak, userId).run();
+
+            await env.DB.prepare(
+              `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'origins')
+               ON CONFLICT(user_id, pack_type, set_id) DO UPDATE SET quantity = quantity + 1`
+            ).bind(userId, rewardedPack).run();
+
             const packNames: Record<string, string> = {
-              'sachet': 'Sachet', 'grand_sachet': 'Grand Sachet', 'boite': 'Boîte', 'coffret': 'Coffret'
+              'sachet': 'Sachet (1 coaster)',
+              'grand_sachet': 'Grand Sachet (3 coasters)',
+              'boite': 'Boîte (5 coasters)'
             };
 
             return Response.json({
               type: 4,
-              data: { content: `🎉 **ÉVÉNEMENT !** Un pack **${packNames[packType] || packType}** a été offert à **${allUsers.length}** joueurs !` }
-            });
-
-          } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur : ${err.message}`, flags: 64 }
-            });
-          }
-        }
-
-        case 'cadeau': {
-          const targetUserId = options?.find((opt: any) => opt.name === 'utilisateur')?.value;
-          const coasterId = options?.find((opt: any) => opt.name === 'coaster_id')?.value;
-
-          if (targetUserId === userId) {
-            return Response.json({
-              type: 4,
-              data: { content: "⛔ Tu ne peux pas t'offrir un cadeau à toi-même !", flags: 64 }
-            });
-          }
-
-          try {
-            const myItem = await env.DB.prepare(
-              `SELECT quantity FROM inventory WHERE user_id = ? AND coaster_id = ? AND quantity > 0`
-            ).bind(userId, coasterId).first() as any;
-
-            if (!myItem || myItem.quantity < 1) {
-              return Response.json({
-                type: 4,
-                data: { content: `❌ Tu ne possèdes pas le coaster \`${coasterId}\` !`, flags: 64 }
-              });
-            }
-
-            await registerUserAndGiveRole(targetUserId, guildId, env);
-
-            await env.DB.batch([
-              env.DB.prepare(`UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`).bind(userId, coasterId),
-              env.DB.prepare(`INSERT INTO inventory (user_id, coaster_id, finish, quantity) VALUES (?, ?, 'normal', 1) ON CONFLICT(user_id, coaster_id, finish) DO UPDATE SET quantity = quantity + 1`).bind(targetUserId, coasterId)
-            ]);
-
-            const coaster = await env.DB.prepare(`SELECT name, rarity FROM coasters WHERE id = ?`).bind(coasterId).first() as any;
-            const { circle, name: rarityName } = getRarityInfo(coaster?.rarity);
-
-            return Response.json({
-              type: 4,
               data: {
-                content: `🎁 **Cadeau !** <@${userId}> a offert${circle} **[${rarityName}]${coaster?.name || coasterId}** à <@${targetUserId}> ! 🎉`
+                content: `📦 **Nouveau Drop récupéré !** Tu as reçu 1x **${packNames[rewardedPack]}** !` +
+                         `\n🔥 **Série actuelle :** **${streak} jour(s)** d'affilée !${bonusMsg}\n` +
+                         `_Utilise \`/ouvrir\` pour découvrir ce qu'il contient !_`
               }
             });
 
           } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur cadeau : ${err.message}`, flags: 64 }
-            });
-          }
-        }
-
-        case 'quotidien': {
-          try {
-            await registerUserAndGiveRole(userId, guildId, env);
-            
-            const userRecord = await env.DB.prepare(`SELECT last_daily FROM users WHERE discord_id = ?`).bind(userId).first() as any;
-            const todayFrench = getFrenchDateString();
-
-            if (userRecord?.last_daily === todayFrench) {
-              return Response.json({
-                type: 4,
-                data: { content: `⏳ Tu as déjà récupéré ton pack quotidien aujourd'hui ! Reviens **demain dès minuit** 🌙` }
-              });
-            }
-
-            await env.DB.prepare(`UPDATE users SET last_daily = ? WHERE discord_id = ?`).bind(todayFrench, userId).run();
-
-            const updateRes = await env.DB.prepare(
-              `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = 'sachet' AND set_id = 'general'`
-            ).bind(userId).run();
-
-            if (!updateRes.meta.changes || updateRes.meta.changes === 0) {
-              await env.DB.prepare(
-                `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, 'sachet', 1, 'general')`
-              ).bind(userId).run();
-            }
-
-            return Response.json({
-              type: 4,
-              data: { content: `🎉 Tu as récupéré ton **Sachet** quotidien ! Utilise \`/ouvrir\` pour l'ouvrir.` }
-            });
-
-          } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur quotidien : ${err.message}`, flags: 64 }
-            });
+            return Response.json({ type: 4, data: { content: `❌ Erreur drop : ${err.message}`, flags: 64 } });
           }
         }
 
         case 'ouvrir': {
           const packType = options?.find((opt: any) => opt.name === 'pack')?.value;
-          if (!packType) {
-            return Response.json({
-              type: 4,
-              data: { content: "❌ Spécifie le pack à ouvrir.", flags: 64 }
-            });
-          }
 
           ctx.waitUntil((async () => {
             try {
               const packRecord = await env.DB.prepare(
-                `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
+                `SELECT quantity FROM user_packs WHERE user_id = ? AND pack_type = ? AND set_id = 'origins'`
               ).bind(userId, packType).first() as any;
 
               if (!packRecord || packRecord.quantity <= 0) {
                 await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ content: `❌ Tu ne possèdes aucun pack \`${packType}\`. Récupère ton pack avec \`/quotidien\` !` })
+                  body: JSON.stringify({ content: `❌ Tu ne possèdes aucun pack \`${packType}\`. Fais un \`/drop\` !` })
                 });
                 return;
               }
@@ -653,12 +604,12 @@ export default {
               };
               const count = packSizes[packType] || 1;
 
-              const { results: allCoasters } = await env.DB.prepare(`SELECT * FROM coasters`).all();
+              const { results: allCoasters } = await env.DB.prepare(`SELECT * FROM coasters WHERE set_id = 'origins'`).all();
               if (!allCoasters || allCoasters.length === 0) {
                 await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ content: "❌ Aucun coaster dans la BDD." })
+                  body: JSON.stringify({ content: "❌ Aucun coaster trouvé pour le set Origins." })
                 });
                 return;
               }
@@ -677,7 +628,7 @@ export default {
 
               const pulledCoasters: any[] = [];
               const dbStatements: D1PreparedStatement[] = [
-                env.DB.prepare(`UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`).bind(userId, packType)
+                env.DB.prepare(`UPDATE user_packs SET quantity = quantity - 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'origins'`).bind(userId, packType)
               ];
 
               for (let i = 0; i < count; i++) {
@@ -715,13 +666,14 @@ export default {
               }).join('\n');
 
               const embed: any = {
-                title: `🎁 Ouverture d'un ${packNames[packType] || packType} !`,
+                title: `🎁 Ouverture d'un ${packNames[packType] || packType} (Origins) !`,
                 description: `Tu as obtenu :\n\n${itemsList}`,
                 color: 14897974
               };
 
-              const imageUrl = "https://raw.githubusercontent.com/remigatier-graphiste/corner-cafe-coasters/main/public/coasters/hiver-2027/coaster_test.png";
-              embed.image = { url: imageUrl };
+              if (pulledCoasters.length > 0 && pulledCoasters[0].image) {
+                embed.image = { url: `https://raw.githubusercontent.com/remigatier-graphiste/corner-cafe-coasters/main/public/coasters/origins/${pulledCoasters[0].image}` };
+              }
 
               await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
                 method: 'PATCH',
@@ -749,28 +701,25 @@ export default {
               `SELECT i.coaster_id, i.finish, i.quantity, c.name, c.rarity 
                FROM inventory i 
                LEFT JOIN coasters c ON i.coaster_id = c.id 
-               WHERE i.user_id = ?`
+               WHERE i.user_id = ? AND i.quantity > 0`
             ).bind(userId).all();
 
             const { results: packs } = await env.DB.prepare(
-              `SELECT pack_type, quantity FROM user_packs WHERE user_id = ? AND quantity > 0`
+              `SELECT pack_type, quantity, set_id FROM user_packs WHERE user_id = ? AND quantity > 0`
             ).bind(userId).all();
 
             const packNames: Record<string, string> = {
-              'sachet': 'Sachet (1 coaster)',
-              'grand_sachet': 'Grand Sachet (3 coasters)',
-              'boite': 'Boîte (5 coasters)',
-              'coffret': 'Coffret (10 coasters)'
+              'sachet': 'Sachet', 'grand_sachet': 'Grand Sachet', 'boite': 'Boîte', 'coffret': 'Coffret'
             };
 
             let description = "**☕ Ton Inventaire & Collection :**\n\n";
 
             description += "**📦 Packs non ouverts :**\n";
             if (!packs || packs.length === 0) {
-              description += "_Aucun pack pour le moment (tape `/quotidien`)_\n";
+              description += "_Aucun pack disponible (tape `/drop`)_\n";
             } else {
               for (const p of packs as any[]) {
-                description += `- **${packNames[p.pack_type] || p.pack_type}** : **x${p.quantity}**\n`;
+                description += `- **${packNames[p.pack_type] || p.pack_type}** (${p.set_id}) : **x${p.quantity}**\n`;
               }
             }
 
@@ -781,20 +730,14 @@ export default {
               for (const row of coasters as any[]) {
                 const coasterName = row.name || row.coaster_id;
                 const { circle, name } = getRarityInfo(row.rarity);
-                description += `- ${circle} **[${name}]** **${coasterName}** (\`ID: ${row.coaster_id}\`) [Finition: *${row.finish}*] : **x${row.quantity}**\n`;
+                description += `- ${circle} **[${name}]** **${coasterName}** (\`ID: ${row.coaster_id}\`) : **x${row.quantity}**\n`;
               }
             }
 
-            return Response.json({
-              type: 4,
-              data: { content: description }
-            });
+            return Response.json({ type: 4, data: { content: description } });
 
           } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur lecture inventaire : ${err.message}`, flags: 64 }
-            });
+            return Response.json({ type: 4, data: { content: `❌ Erreur inventaire : ${err.message}`, flags: 64 } });
           }
         }
 
@@ -806,11 +749,13 @@ export default {
               `SELECT i.coaster_id, i.quantity, c.rarity 
                FROM inventory i 
                LEFT JOIN coasters c ON i.coaster_id = c.id 
-               WHERE i.user_id = ?`
+               WHERE i.user_id = ? AND i.quantity > 0`
             ).bind(userId).all();
 
-            const totalExistingRes = await env.DB.prepare(`SELECT COUNT(*) as total FROM coasters`).first() as any;
-            const totalExisting = totalExistingRes?.total || 0;
+            const userRecord = await env.DB.prepare(`SELECT streak_count FROM users WHERE discord_id = ?`).bind(userId).first() as any;
+
+            const totalExistingRes = await env.DB.prepare(`SELECT COUNT(*) as total FROM coasters WHERE set_id = 'origins'`).first() as any;
+            const totalExisting = totalExistingRes?.total || 75;
 
             let totalCards = 0;
             let uniqueCards = coasters.length;
@@ -825,31 +770,28 @@ export default {
               const { name: rarityName } = getRarityInfo(row.rarity);
               if (rarityCounts[rarityName] !== undefined) {
                 rarityCounts[rarityName] += qty;
-              } else {
-                rarityCounts[rarityName] = (rarityCounts[rarityName] || 0) + qty;
               }
             }
 
             const completionPercent = totalExisting > 0 ? Math.round((uniqueCards / totalExisting) * 100) : 0;
 
             let rankTitle = "🌱 Débutant Curieux";
-            if (completionPercent >= 100) rankTitle = "👑 Maître du Café (Collection Complète !)";
+            if (completionPercent >= 100) rankTitle = "👑 Maître du Café (Origins Complété !)";
             else if (completionPercent >= 75) rankTitle = "🌟 Collectionneur Expert";
             else if (completionPercent >= 40) rankTitle = "☕ Amateur Éclairé";
             else if (completionPercent >= 20) rankTitle = "☕ Apprenti Barista";
 
             const userObj = interaction.member?.user || interaction.user;
             const userName = userObj?.username || "Barista";
-            const avatarHash = userObj?.avatar;
-            const avatarUrl = avatarHash ? `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.png` : undefined;
 
             const profileDesc = [
               `**Statut :** ${rankTitle}`,
+              `🔥 **Série en cours :** **${userRecord?.streak_count || 0} jour(s)** consécutifs`,
               ``,
-              `📊 **Complétion :** **${uniqueCards} /${totalExisting}** uniques (${completionPercent}%)`,
+              `📊 **Complétion (Origins) :** **${uniqueCards} / ${totalExisting}** uniques (${completionPercent}%)`,
               `📦 **Total de cartes :** **${totalCards}** (avec doublons)`,
               ``,
-              `🎨 **Cartes par rareté :**`,
+              `🎨 **Détail par rareté :**`,
               `🟤 **Carton** : ${rarityCounts['Carton'] || 0}`,
               `🪵 **Bois** : ${rarityCounts['Bois'] || 0}`,
               `⬛ **Ardoise** : ${rarityCounts['Ardoise'] || 0}`,
@@ -864,159 +806,119 @@ export default {
               color: 14897974
             };
 
-            if (avatarUrl) {
-              embed.thumbnail = { url: avatarUrl };
-            }
-
-            return Response.json({
-              type: 4,
-              data: { embeds: [embed] }
-            });
+            return Response.json({ type: 4, data: { embeds: [embed] } });
 
           } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur lecture profil : ${err.message}`, flags: 64 }
-            });
-          }
-        }
-
-        case 'proposer': {
-          const myCoasterId = options?.find((opt: any) => opt.name === 'mon_coaster')?.value;
-          const wantCoasterId = options?.find((opt: any) => opt.name === 'coaster_desire')?.value;
-
-          try {
-            await registerUserAndGiveRole(userId, guildId, env);
-
-            const myItem = await env.DB.prepare(
-              `SELECT i.quantity, c.name, c.rarity FROM inventory i LEFT JOIN coasters c ON i.coaster_id = c.id WHERE i.user_id = ? AND i.coaster_id = ? AND i.quantity > 0`
-            ).bind(userId, myCoasterId).first() as any;
-
-            if (!myItem || myItem.quantity < 1) {
-              return Response.json({
-                type: 4,
-                data: { content: `❌ Tu ne possèdes pas le coaster \`${myCoasterId}\` !`, flags: 64 }
-              });
-            }
-
-            const wantItem = await env.DB.prepare(
-              `SELECT name, rarity FROM coasters WHERE id = ?`
-            ).bind(wantCoasterId).first() as any;
-
-            const myRarity = getRarityInfo(myItem.rarity);
-            const wantRarity = getRarityInfo(wantItem?.rarity);
-
-            const offerName = myItem.name || myCoasterId;
-            const wantName = wantItem?.name || wantCoasterId;
-
-            return Response.json({
-              type: 4,
-              data: {
-                content: `🔄 **Proposition d'Échange Public** par <@${userId}> !\n\n` +
-                         `• **Donne :** ${myRarity.circle} **[${myRarity.name}]** **${offerName}** (\`${myCoasterId}\`)\n` +
-                         `• **Demande :** ${wantRarity.circle} **[${wantRarity.name}]** **${wantName}** (\`${wantCoasterId}\`)\n\n` +
-                         `_Si tu possèdes \`${wantCoasterId}\`, clique sur le bouton ci-dessous pour effectuer l'échange immédiatement !_`,
-                components: [
-                  {
-                    type: 1,
-                    components: [
-                      {
-                        type: 2,
-                        style: 3,
-                        label: 'Accepter l\'échange 🤝',
-                        custom_id: `accept_trade:${userId}:${myCoasterId}:${wantCoasterId}`
-                      }
-                    ]
-                  }
-                ]
-              }
-            });
-
-          } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur création échange : ${err.message}`, flags: 64 }
-            });
+            return Response.json({ type: 4, data: { content: `❌ Erreur profil : ${err.message}`, flags: 64 } });
           }
         }
 
         case 'changer': {
-          const coasterId = options?.find((opt: any) => opt.name === 'coaster_id')?.value;
+          const ids = [
+            options?.find((o: any) => o.name === 'coaster_1')?.value,
+            options?.find((o: any) => o.name === 'coaster_2')?.value,
+            options?.find((o: any) => o.name === 'coaster_3')?.value,
+            options?.find((o: any) => o.name === 'coaster_4')?.value,
+            options?.find((o: any) => o.name === 'coaster_5')?.value,
+          ].filter(Boolean);
 
           try {
             await registerUserAndGiveRole(userId, guildId, env);
 
-            const item = await env.DB.prepare(
-              `SELECT i.quantity, c.name, c.rarity FROM inventory i LEFT JOIN coasters c ON i.coaster_id = c.id WHERE i.user_id = ? AND i.coaster_id = ?`
-            ).bind(userId, coasterId).first() as any;
-
-            if (!item || item.quantity < 5) {
-              const qty = item?.quantity || 0;
-              return Response.json({
-                type: 4,
-                data: { content: `❌ Tu n'as pas assez d'exemplaires de \`${coasterId}\` ! (Possédés : **${qty}/5**)`, flags: 64 }
-              });
+            if (ids.length !== 5) {
+              return Response.json({ type: 4, data: { content: "❌ Tu dois spécifier exactement 5 coasters !", flags: 64 } });
             }
 
-            const rarityLower = (item.rarity || '').toLowerCase().trim();
+            // Compter combien d'exemplaires de chaque ID sont demandés au recyclage
+            const requestedCounts: Record<string, number> = {};
+            for (const id of ids) {
+              requestedCounts[id] = (requestedCounts[id] || 0) + 1;
+            }
 
-            if (rarityLower.includes('diamant')) {
-              return Response.json({
-                type: 4,
-                data: { content: `⛔ Les coasters Diamant ne peuvent pas être recyclés !`, flags: 64 }
-              });
+            // Vérifier la présence des coasters et la sécurité doublon (il faut posséder au moins requested + 1 exemplaires)
+            const coastersInfo: any[] = [];
+            for (const [id, countNeeded] of Object.entries(requestedCounts)) {
+              const item = await env.DB.prepare(
+                `SELECT i.quantity, c.name, c.rarity FROM inventory i LEFT JOIN coasters c ON i.coaster_id = c.id WHERE i.user_id = ? AND i.coaster_id = ?`
+              ).bind(userId, id).first() as any;
+
+              if (!item || item.quantity <= countNeeded) {
+                const owned = item?.quantity || 0;
+                return Response.json({
+                  type: 4,
+                  data: {
+                    content: `⛔ **Recyclage refusé (Protection Doublon) :** Tu essaies de recycler ${countNeeded}x \`${id}\`, mais tu n'en possèdes que ${owned}. Il faut en garder **au moins 1 exemplaire** dans ta collection !`,
+                    flags: 64
+                  }
+                });
+              }
+
+              coastersInfo.push({ id, countNeeded, rarity: item.rarity, name: item.name });
+            }
+
+            // Vérification que tous les coasters sont de la MÊME rareté
+            const firstCoasterRarity = (coastersInfo[0].rarity || '').toLowerCase().trim();
+            for (const c of coastersInfo) {
+              const r = (c.rarity || '').toLowerCase().trim();
+              if (r !== firstCoasterRarity) {
+                return Response.json({
+                  type: 4,
+                  data: { content: "❌ Tous les 5 coasters doivent appartenir à la **même rareté** !", flags: 64 }
+                });
+              }
+            }
+
+            if (firstCoasterRarity.includes('diamant')) {
+              return Response.json({ type: 4, data: { content: "⛔ Les cartes Diamant sont trop précieuses pour être recyclées !", flags: 64 } });
             }
 
             let rewardedPack = 'sachet';
             let packName = 'Sachet (1 coaster)';
 
-            if (rarityLower.includes('bois')) {
+            if (firstCoasterRarity.includes('bois')) {
               rewardedPack = 'grand_sachet';
               packName = 'Grand Sachet (3 coasters)';
-            } else if (rarityLower.includes('ardoise')) {
+            } else if (firstCoasterRarity.includes('ardoise')) {
               rewardedPack = 'boite';
               packName = 'Boîte (5 coasters)';
-            } else if (rarityLower.includes('ceramique') || rarityLower.includes('céramique') || rarityLower.includes('metal') || rarityLower.includes('métal')) {
+            } else if (firstCoasterRarity.includes('ceramique') || firstCoasterRarity.includes('céramique') || firstCoasterRarity.includes('metal') || firstCoasterRarity.includes('métal')) {
               rewardedPack = 'coffret';
               packName = 'Coffret (10 coasters)';
             }
 
-            const updatePackRes = await env.DB.prepare(
-              `UPDATE user_packs SET quantity = quantity + 1 WHERE user_id = ? AND pack_type = ? AND set_id = 'general'`
-            ).bind(userId, rewardedPack).run();
-
-            if (!updatePackRes.meta.changes || updatePackRes.meta.changes === 0) {
-              await env.DB.prepare(
-                `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'general')`
-              ).bind(userId, rewardedPack).run();
+            // Déduire les 5 coasters et ajouter le pack
+            const statements: D1PreparedStatement[] = [];
+            for (const [id, count] of Object.entries(requestedCounts)) {
+              statements.push(
+                env.DB.prepare(`UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND coaster_id = ?`).bind(count, userId, id)
+              );
             }
 
-            await env.DB.prepare(
-              `UPDATE inventory SET quantity = quantity - 5 WHERE user_id = ? AND coaster_id = ? AND finish = 'normal'`
-            ).bind(userId, coasterId).run();
+            statements.push(
+              env.DB.prepare(
+                `INSERT INTO user_packs (user_id, pack_type, quantity, set_id) VALUES (?, ?, 1, 'origins')
+                 ON CONFLICT(user_id, pack_type, set_id) DO UPDATE SET quantity = quantity + 1`
+              ).bind(userId, rewardedPack)
+            );
 
-            const { circle } = getRarityInfo(item.rarity);
+            await env.DB.batch(statements);
+
+            const { circle } = getRarityInfo(coastersInfo[0].rarity);
 
             return Response.json({
               type: 4,
               data: {
-                content: `♻️ **Recyclage réussi !** Tu as échangé 5x ${circle} **${item.name || coasterId}** contre 1x **${packName}** ! 🎉`
+                content: `♻️ **Recyclage réussi !** Tu as recyclé 5x coasters ${circle} contre 1x **${packName}** (Origins) ! 🎉`
               }
             });
 
           } catch (err: any) {
-            return Response.json({
-              type: 4,
-              data: { content: `❌ Erreur recyclage : ${err.message}`, flags: 64 }
-            });
+            return Response.json({ type: 4, data: { content: `❌ Erreur recyclage : ${err.message}`, flags: 64 } });
           }
         }
 
         default:
-          return Response.json({
-            type: 4,
-            data: { content: "Commande inconnue 🤖", flags: 64 }
-          });
+          return Response.json({ type: 4, data: { content: "Commande inconnue 🤖", flags: 64 } });
       }
     }
 
