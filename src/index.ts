@@ -800,6 +800,65 @@ export default {
           }
         }
 
+        case 'proposer': {
+          const myCoasterId = options?.find((opt: any) => opt.name === 'mon_coaster')?.value;
+          const wantCoasterId = options?.find((opt: any) => opt.name === 'coaster_desire')?.value;
+
+          try {
+            await registerUserAndGiveRole(userId, guildId, env);
+
+            const myItem = await env.DB.prepare(
+              `SELECT i.quantity, c.name, c.rarity FROM inventory i LEFT JOIN coasters c ON i.coaster_id = c.id WHERE i.user_id = ? AND i.coaster_id = ? AND i.quantity > 0`
+            ).bind(userId, myCoasterId).first() as any;
+
+            if (!myItem || myItem.quantity < 1) {
+              return Response.json({
+                type: 4,
+                data: { content: `❌ Tu ne possèdes pas le coaster \`${myCoasterId}\` !`, flags: 64 }
+              });
+            }
+
+            const wantItem = await env.DB.prepare(
+              `SELECT name, rarity FROM coasters WHERE id = ?`
+            ).bind(wantCoasterId).first() as any;
+
+            const myRarity = getRarityInfo(myItem.rarity);
+            const wantRarity = getRarityInfo(wantItem?.rarity);
+
+            const offerName = myItem.name || myCoasterId;
+            const wantName = wantItem?.name || wantCoasterId;
+
+            return Response.json({
+              type: 4,
+              data: {
+                content: `🔄 **Proposition d'Échange Public** par <@${userId}> !\n\n` +
+                         `• **Donne :** ${myRarity.circle} **[${myRarity.name}]** **${offerName}** (\`${myCoasterId}\`)\n` +
+                         `• **Demande :** ${wantRarity.circle} **[${wantRarity.name}]** **${wantName}** (\`${wantCoasterId}\`)\n\n` +
+                         `_Si tu possèdes \`${wantCoasterId}\`, clique sur le bouton ci-dessous pour effectuer l'échange immédiatement !_`,
+                components: [
+                  {
+                    type: 1,
+                    components: [
+                      {
+                        type: 2,
+                        style: 3,
+                        label: 'Accepter l\'échange 🤝',
+                        custom_id: `accept_trade:${userId}:${myCoasterId}:${wantCoasterId}`
+                      }
+                    ]
+                  }
+                ]
+              }
+            });
+
+          } catch (err: any) {
+            return Response.json({
+              type: 4,
+              data: { content: `❌ Erreur création échange : ${err.message}`, flags: 64 }
+            });
+          }
+        }
+
         case 'changer': {
           const ids = [
             options?.find((o: any) => o.name === 'coaster_1')?.value,
@@ -891,3 +950,20 @@ export default {
             return Response.json({
               type: 4,
               data: {
+                content: `♻️ **Recyclage réussi !** Tu as recyclé 5x coasters ${circle} contre 1x **${packName}** (Origins) ! 🎉`
+              }
+            });
+
+          } catch (err: any) {
+            return Response.json({ type: 4, data: { content: `❌ Erreur recyclage : ${err.message}`, flags: 64 } });
+          }
+        }
+
+        default:
+          return Response.json({ type: 4, data: { content: "Commande inconnue 🤖", flags: 64 } });
+      }
+    }
+
+    return Response.json({ type: 1 });
+  }
+};
